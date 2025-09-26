@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1073487307227",
+    "project_id": "location-tracker-b045b",
+    "storage_bucket": "location-tracker-b045b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1073487307227:android:db600c9501195f801387fe",
+        "android_client_info": {
+          "package_name": "com.innovision.tripsync"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC1yQqO_4e4i5b4NRzQqHqZEVly2Z6TAgU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
