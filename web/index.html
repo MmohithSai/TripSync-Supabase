@@ -1,38 +1,76 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
+
 <head>
-  <!--
-    If you are serving your web app in a path other than the root, change the
-    href value below to reflect the base path you are serving from.
-
-    The path provided below has to start and end with a slash "/" in order for
-    it to work correctly.
-
-    For more details:
-    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
-
-    This is a placeholder for base href that will be replaced by the value of
-    the `--base-href` argument provided to `flutter build`.
-  -->
-  <base href="$FLUTTER_BASE_HREF">
-
   <meta charset="UTF-8">
-  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
-
-  <!-- iOS meta tags & icons -->
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="location_tracker_app">
-  <link rel="apple-touch-icon" href="icons/Icon-192.png">
-
-  <!-- Favicon -->
-  <link rel="icon" type="image/png" href="favicon.png"/>
-
-  <title>location_tracker_app</title>
-  <link rel="manifest" href="manifest.json">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Location Tracker Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
-  <script src="flutter_bootstrap.js" async></script>
+  <div class="container">
+    <div class="header">
+      <h1>Location Tracker Analytics Dashboard</h1>
+      <p>Real-time insights into mobility patterns and trip data</p>
+    </div>
+
+    <div class="controls">
+      <input type="date" id="startDate" />
+      <input type="date" id="endDate" />
+      <button class="btn" onclick="loadData()">Load Data</button>
+      <button class="btn" onclick="exportData()">Export CSV</button>
+    </div>
+
+    <div id="loading" class="loading">
+      <p>Loading data...</p>
+    </div>
+
+    <div id="error" class="error" style="display: none;">
+      <p id="errorMessage"></p>
+    </div>
+
+    <div id="content" style="display: none;">
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value" id="totalTrips">0</div>
+          <div class="stat-label">Total Trips</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="totalDistance">0 km</div>
+          <div class="stat-label">Total Distance</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="avgDistance">0 km</div>
+          <div class="stat-label">Average Distance</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="co2Saved">0 kg</div>
+          <div class="stat-label">CO₂ Saved</div>
+        </div>
+      </div>
+
+      <div class="chart-container">
+        <h3>Trip Count by Day</h3>
+        <canvas id="tripChart"></canvas>
+      </div>
+
+      <div class="chart-container">
+        <h3>Transportation Mode Distribution</h3>
+        <canvas id="modeChart"></canvas>
+      </div>
+
+      <div class="map-container">
+        <h3>Origin-Destination Heatmap</h3>
+        <div id="map"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="dashboard.js"></script>
 </body>
+
 </html>

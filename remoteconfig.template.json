@@ -1,0 +1,82 @@
+{
+    "parameters": {
+        "tripDetectionConfig": {
+            "defaultValue": {
+                "autoStartSpeedThreshold": 1.2,
+                "autoStartTimeThreshold": 120,
+                "stopRadiusThreshold": 50.0,
+                "stopTimeThreshold": 180,
+                "minDistanceThreshold": 150.0,
+                "minDurationThreshold": 300,
+                "distanceFilter": 25.0,
+                "intervalDuration": 5
+            },
+            "description": "Trip detection configuration parameters",
+            "valueType": "JSON"
+        },
+        "exportSettings": {
+            "defaultValue": {
+                "enabled": true,
+                "schedule": "0 2 * * *",
+                "retentionDays": 30,
+                "anonymizeData": true
+            },
+            "description": "Export settings configuration",
+            "valueType": "JSON"
+        },
+        "featureFlags": {
+            "defaultValue": {
+                "accelerometerFusion": true,
+                "batteryOptimizationWarning": true,
+                "batchEditing": true,
+                "weeklySummary": true,
+                "environmentalImpact": true
+            },
+            "description": "Feature flags for enabling/disabling features",
+            "valueType": "JSON"
+        }
+    },
+    "parameterGroups": {
+        "tripDetection": {
+            "description": "Trip detection and tracking parameters",
+            "parameters": {
+                "tripDetectionConfig": {}
+            }
+        },
+        "export": {
+            "description": "Data export and analytics settings",
+            "parameters": {
+                "exportSettings": {}
+            }
+        },
+        "features": {
+            "description": "Feature flags and experimental features",
+            "parameters": {
+                "featureFlags": {}
+            }
+        }
+    },
+    "conditions": [
+        {
+            "name": "beta_users",
+            "expression": "user.userId in ['beta-user-1', 'beta-user-2']",
+            "tagColor": "BLUE"
+        },
+        {
+            "name": "premium_users",
+            "expression": "user.customClaims.premium == true",
+            "tagColor": "GREEN"
+        }
+    ],
+    "version": {
+        "versionNumber": "1",
+        "updateTime": "2024-01-01T00:00:00.000Z",
+        "updateUser": {
+            "email": "admin@example.com"
+        },
+        "updateOrigin": "CONSOLE",
+        "updateType": "INCREMENTAL_UPDATE"
+    }
+}
+
+

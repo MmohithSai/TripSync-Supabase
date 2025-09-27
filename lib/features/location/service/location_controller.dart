@@ -8,6 +8,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 
 import '../../../common/providers.dart';
 import '../data/local_location_queue.dart';
+import 'remote_config_service.dart';
 
 class LocationState {
   final Position? currentPosition;
@@ -35,7 +36,7 @@ class LocationState {
 
 class LocationController extends Notifier<LocationState> {
   StreamSubscription<Position>? _subscription;
-  StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
+  StreamSubscription<ConnectivityResult>? _connectivitySub;
   Position? _lastPersistedPosition;
   DateTime? _lastPersistedTime;
   final LocalLocationQueue _localQueue = LocalLocationQueue();
@@ -51,20 +52,23 @@ class LocationController extends Notifier<LocationState> {
     );
   }
 
-  Stream<Position> get positionStream => Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.bestForNavigation,
-          distanceFilter: 1,
-        ),
-      );
+  Stream<Position> get positionStream {
+    final bool isMoving = false; // fallback default; adaptive handled in _start
+    return Geolocator.getPositionStream(
+      locationSettings: LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: isMoving ? 5 : 25,
+      ),
+    );
+  }
 
   Future<void> _init() async {
     await _ensurePermissions();
     if (state.permissionsGranted) {
       await _start();
     }
-    _connectivitySub = Connectivity().onConnectivityChanged.listen((results) async {
-      if (results.any((r) => r != ConnectivityResult.none)) {
+    _connectivitySub = Connectivity().onConnectivityChanged.listen((result) async {
+      if (result != ConnectivityResult.none) {
         await _syncLocalQueue();
       }
     });
@@ -95,39 +99,43 @@ class LocationController extends Notifier<LocationState> {
     await _subscription?.cancel();
 
     final LocationSettings baseSettings = const LocationSettings(
-      accuracy: LocationAccuracy.bestForNavigation,
-      distanceFilter: 1,
+      accuracy: LocationAccuracy.high,
+      distanceFilter: 25,
     );
 
-    // Platform-specific tuning (foreground service notification only on Android when supported)
+    // Optimized location settings for battery efficiency
     final Stream<Position> stream;
     if (defaultTargetPlatform == TargetPlatform.android) {
       stream = Geolocator.getPositionStream(
         locationSettings: AndroidSettings(
-          accuracy: LocationAccuracy.bestForNavigation,
-          distanceFilter: 0,
-          // Faster updates while in foreground (battery trade-off)
-          intervalDuration: const Duration(milliseconds: 800),
-          forceLocationManager: true,
+          accuracy: LocationAccuracy.medium, // Reduced from high for battery savings
+          distanceFilter: 50, // Increased to reduce frequency
+          intervalDuration: const Duration(seconds: 10), // Increased interval
+          forceLocationManager: false, // Use FusedLocationProvider for better battery
           foregroundNotificationConfig: ForegroundNotificationConfig(
-            notificationText: 'Tracking location in background',
+            notificationText: 'Tracking location efficiently',
             notificationTitle: 'TripSync',
-            enableWakeLock: true,
+            enableWakeLock: false, // Disable wake lock for battery savings
           ),
         ),
       );
     } else if (defaultTargetPlatform == TargetPlatform.iOS) {
       stream = Geolocator.getPositionStream(
         locationSettings: AppleSettings(
-          accuracy: LocationAccuracy.bestForNavigation,
-          distanceFilter: 1,
+          accuracy: LocationAccuracy.medium, // Reduced for battery savings
+          distanceFilter: 50, // Increased to reduce frequency
           showBackgroundLocationIndicator: true,
           allowBackgroundLocationUpdates: true,
-          pauseLocationUpdatesAutomatically: false,
+          pauseLocationUpdatesAutomatically: true, // Enable auto-pause for battery
         ),
       );
     } else {
-      stream = Geolocator.getPositionStream(locationSettings: baseSettings);
+      stream = Geolocator.getPositionStream(
+        locationSettings: LocationSettings(
+          accuracy: LocationAccuracy.medium,
+          distanceFilter: 50,
+        ),
+      );
     }
 
     _subscription = stream.listen(
@@ -167,10 +175,10 @@ class LocationController extends Notifier<LocationState> {
   }
 
   bool _hasMeaningfulMovement(Position current) {
-    // Require at least 50 meters movement or 20 seconds elapsed and >30m HDOP approximation
-    const double minDistanceMeters = 50.0;
-    const int minSecondsBetween = 20;
-    const double minAccuracyMeters = 30.0;
+    final config = ref.read(currentTripDetectionConfigProvider);
+    final double minDistanceMeters = config.distanceFilter;
+    const int minSecondsBetween = 30;
+    const double minAccuracyMeters = 25.0;
 
     final DateTime now = DateTime.now();
     if (_lastPersistedPosition == null) return true; // first point
@@ -247,8 +255,10 @@ class LocationController extends Notifier<LocationState> {
   }
 
   Future<void> _syncLocalQueue() async {
-    final results = await Connectivity().checkConnectivity();
-    if (!results.any((r) => r != ConnectivityResult.none)) return;
+    // Clean up old entries periodically to save storage
+    await _localQueue.cleanupOldEntries();
+    final result = await Connectivity().checkConnectivity();
+    if (result == ConnectivityResult.none) return;
     final pending = await _localQueue.peekAll();
     if (pending.isEmpty) return;
     final user = ref.read(firebaseAuthProvider).currentUser;

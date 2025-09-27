@@ -63,7 +63,7 @@ class LocalLocationQueue {
       'accuracy': accuracy,
       'timestamp_ms': timestampMs,
     });
-    await _trimIfTooLarge(maxRows: 5000);
+    await _trimIfTooLarge(maxRows: 2000);
   }
 
   Future<List<Map<String, dynamic>>> peekAll() async {
@@ -98,6 +98,13 @@ class LocalLocationQueue {
     final toDelete = c - maxRows;
     // Delete the oldest rows
     await db.rawDelete('DELETE FROM $_table WHERE id IN (SELECT id FROM $_table ORDER BY id ASC LIMIT ?)', [toDelete]);
+  }
+
+  Future<void> cleanupOldEntries() async {
+    final db = await _open();
+    // Remove entries older than 3 days to save storage
+    final cutoffTime = DateTime.now().subtract(const Duration(days: 3)).millisecondsSinceEpoch;
+    await db.delete(_table, where: 'timestamp_ms < ?', whereArgs: [cutoffTime]);
   }
 }
 

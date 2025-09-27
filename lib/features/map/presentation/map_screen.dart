@@ -8,6 +8,9 @@ import 'package:geolocator/geolocator.dart';
 import '../../location/service/location_controller.dart';
 import '../data/places_repository.dart';
 import '../../../common/providers.dart';
+import '../../trips/service/trip_controller.dart';
+import '../../trips/domain/trip_models.dart';
+import '../../itinerary/presentation/trip_suggestions_screen.dart';
 
 class MapScreen extends ConsumerStatefulWidget {
   const MapScreen({super.key});
@@ -55,6 +58,7 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
     final user = ref.watch(firebaseAuthProvider).currentUser;
     final placesRepo = ref.read(placesRepositoryProvider);
     final position = locationState.currentPosition;
+    final tripState = ref.watch(tripControllerProvider);
 
 
     // Permission and service prompts are handled globally by PermissionGate
@@ -162,7 +166,18 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
                 const SnackBar(content: Text('Place saved')),
               );
             },
-            markers: {
+                polylines: {
+                  if (tripState.bufferedPoints.length >= 2)
+                    Polyline(
+                      polylineId: const PolylineId('active_trip'),
+                      color: Colors.indigo,
+                      width: 4,
+                      points: tripState.bufferedPoints
+                          .map((p) => LatLng(p.latitude, p.longitude))
+                          .toList(),
+                    ),
+                },
+                markers: {
               if (position != null)
                 Marker(
                   markerId: const MarkerId('me'),
@@ -176,28 +191,243 @@ class _MapScreenState extends ConsumerState<MapScreen> with WidgetsBindingObserv
           Positioned(
             left: 16,
             bottom: 24,
-            child: FloatingActionButton.extended(
-              heroTag: 'locate_me',
-              icon: const Icon(Icons.my_location),
-              label: const Text('Locate me'),
-              onPressed: () async {
-                final controller = ref.read(locationControllerProvider.notifier);
-                final state = ref.read(locationControllerProvider);
-                if (!state.permissionsGranted) {
-                  await controller.requestPermissions();
-                }
-                await controller.refreshNow();
-                final p = ref.read(locationControllerProvider).currentPosition;
-                if (p != null && _mapController != null) {
-                  _mapController!.animateCamera(
-                    CameraUpdate.newLatLng(LatLng(p.latitude, p.longitude)),
-                  );
-                }
-              },
+            child: Row(
+              children: [
+                FloatingActionButton.extended(
+                  heroTag: 'locate_me',
+                  icon: const Icon(Icons.my_location),
+                  label: const Text('Locate'),
+                  onPressed: () async {
+                    final controller = ref.read(locationControllerProvider.notifier);
+                    final s = ref.read(locationControllerProvider);
+                    if (!s.permissionsGranted) {
+                      await controller.requestPermissions();
+                    }
+                    await controller.refreshNow();
+                    final p = ref.read(locationControllerProvider).currentPosition;
+                    if (p != null && _mapController != null) {
+                      _mapController!.animateCamera(
+                        CameraUpdate.newLatLng(LatLng(p.latitude, p.longitude)),
+                      );
+                    }
+                  },
+                ),
+                const SizedBox(width: 12),
+                FloatingActionButton.extended(
+                  heroTag: 'trip_toggle',
+                  icon: Icon(tripState.activeTripId == null ? Icons.play_arrow : Icons.stop),
+                  label: Text(tripState.activeTripId == null ? 'Start' : 'Stop'),
+                  onPressed: () async {
+                    final ctrl = ref.read(tripControllerProvider.notifier);
+                    final loc = ref.read(locationControllerProvider);
+                    // Basic guardrails and UX feedback
+                    if (!loc.permissionsGranted) {
+                      await ref.read(locationControllerProvider.notifier).requestPermissions();
+                    }
+                    if (!mounted) return;
+                    try {
+                    if (tripState.activeTripId == null) {
+                        // Prompt for manual details
+                        final result = await showModalBottomSheet<({TripMode? mode, TripPurpose? purpose, String? destinationRegion, String? originRegion, int adults, int children, int seniors, String? tripNumber, String? chainId})>(
+                          context: context,
+                          showDragHandle: true,
+                          isScrollControlled: true,
+                          builder: (context) {
+                            TripMode? selMode;
+                            TripPurpose? selPurpose;
+                            final destController = TextEditingController();
+                            final tripNumberController = TextEditingController();
+                            final chainIdController = TextEditingController();
+                            final originController = TextEditingController();
+                            int adults = 0;
+                            int children = 0;
+                            int seniors = 0;
+                            return Padding(
+                              padding: EdgeInsets.only(
+                                bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+                                left: 16,
+                                right: 16,
+                                top: 16,
+                              ),
+                              child: StatefulBuilder(
+                                builder: (context, setSheetState) {
+                                  return Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                                    children: [
+                                      Text('Start trip', style: Theme.of(context).textTheme.titleMedium),
+                                      const SizedBox(height: 12),
+                                      DropdownButtonFormField<TripMode?>(
+                                        value: selMode,
+                                        items: [
+                                          const DropdownMenuItem(value: null, child: Text('None')),
+                                          ...TripMode.values
+                                              .map((m) => DropdownMenuItem(value: m, child: Text(m.name)))
+                                              .toList(),
+                                        ],
+                                        onChanged: (v) => setSheetState(() => selMode = v),
+                                        decoration: const InputDecoration(labelText: 'Mode (optional)'),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      DropdownButtonFormField<TripPurpose?>(
+                                        value: selPurpose,
+                                        items: [
+                                          const DropdownMenuItem(value: null, child: Text('None')),
+                                          ...TripPurpose.values
+                                              .map((p) => DropdownMenuItem(value: p, child: Text(p.name)))
+                                              .toList(),
+                                        ],
+                                        onChanged: (v) => setSheetState(() => selPurpose = v),
+                                        decoration: const InputDecoration(labelText: 'Purpose (optional)'),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      TextField(
+                                        controller: destController,
+                                        decoration: const InputDecoration(
+                                          labelText: 'Destination region (optional)',
+                                          hintText: 'e.g. Downtown, Sector 21, City Center',
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      TextField(
+                                        controller: originController,
+                                        decoration: const InputDecoration(
+                                          labelText: 'Origin region (optional)',
+                                          hintText: 'e.g. Home area, Sector 12',
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      TextField(
+                                        controller: tripNumberController,
+                                        decoration: const InputDecoration(
+                                          labelText: 'Trip number (optional)',
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      TextField(
+                                        controller: chainIdController,
+                                        decoration: const InputDecoration(
+                                          labelText: 'Chain ID (optional)',
+                                          hintText: 'Link multiple trips',
+                                        ),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Text('Passengers', style: Theme.of(context).textTheme.titleSmall),
+                                      const SizedBox(height: 8),
+                                      Row(
+                                        children: [
+                                          Expanded(child: Text('Adults')),
+                                          IconButton(onPressed: () => setSheetState(() => adults = adults > 0 ? adults - 1 : 0), icon: const Icon(Icons.remove_circle_outline)),
+                                          Text('$adults'),
+                                          IconButton(onPressed: () => setSheetState(() => adults = adults + 1), icon: const Icon(Icons.add_circle_outline)),
+                                        ],
+                                      ),
+                                      Row(
+                                        children: [
+                                          Expanded(child: Text('Children')),
+                                          IconButton(onPressed: () => setSheetState(() => children = children > 0 ? children - 1 : 0), icon: const Icon(Icons.remove_circle_outline)),
+                                          Text('$children'),
+                                          IconButton(onPressed: () => setSheetState(() => children = children + 1), icon: const Icon(Icons.add_circle_outline)),
+                                        ],
+                                      ),
+                                      Row(
+                                        children: [
+                                          Expanded(child: Text('Seniors')),
+                                          IconButton(onPressed: () => setSheetState(() => seniors = seniors > 0 ? seniors - 1 : 0), icon: const Icon(Icons.remove_circle_outline)),
+                                          Text('$seniors'),
+                                          IconButton(onPressed: () => setSheetState(() => seniors = seniors + 1), icon: const Icon(Icons.add_circle_outline)),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.end,
+                                        children: [
+                                          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+                                          const SizedBox(width: 8),
+                                          FilledButton(
+                                            onPressed: () => Navigator.pop<({TripMode? mode, TripPurpose? purpose, String? destinationRegion, String? originRegion, int adults, int children, int seniors, String? tripNumber, String? chainId})>(
+                                              context,
+                                              (mode: selMode,
+                                               purpose: selPurpose,
+                                               destinationRegion: destController.text.trim().isEmpty ? null : destController.text.trim(),
+                                               originRegion: originController.text.trim().isEmpty ? null : originController.text.trim(),
+                                               adults: adults,
+                                               children: children,
+                                               seniors: seniors,
+                                               tripNumber: tripNumberController.text.trim().isEmpty ? null : tripNumberController.text.trim(),
+                                               chainId: chainIdController.text.trim().isEmpty ? null : chainIdController.text.trim()),
+                                            ),
+                                            child: const Text('Start'),
+                                          )
+                                        ],
+                                      )
+                                    ],
+                                  );
+                                },
+                              ),
+                            );
+                          },
+                        );
+                        if (result == null && mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Trip start cancelled')),
+                          );
+                          return;
+                        }
+                        await ctrl.startManual(
+                          mode: result?.mode ?? TripMode.unknown,
+                          purpose: result?.purpose ?? TripPurpose.unknown,
+                        );
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Trip started')),
+                        );
+                    } else {
+                      await ctrl.stopManual();
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Trip stopped')),
+                        );
+                      }
+                    } catch (e) {
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Action failed: $e')),
+                      );
+                    }
+                  },
+                ),
+              ],
             ),
           ),
           // No extra in-app permission banner; rely on OS dialog and Settings flow
         ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _discoverNearbyPlaces(context),
+        icon: const Icon(Icons.explore),
+        label: const Text('Discover Places'),
+      ),
+    );
+  }
+
+  void _discoverNearbyPlaces(BuildContext context) {
+    final locationState = ref.read(locationControllerProvider);
+    final currentPosition = locationState.currentPosition;
+    
+    if (currentPosition == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Location not available. Please wait for GPS fix.')),
+      );
+      return;
+    }
+    
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => TripSuggestionsScreen(
+          latitude: currentPosition.latitude,
+          longitude: currentPosition.longitude,
+        ),
       ),
     );
   }
