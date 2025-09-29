@@ -92,8 +92,9 @@ class TripController extends Notifier<TripState> {
     double? destinationLongitude,
     String? destinationPlaceId,
   }) async {
-    // For now, use a mock user ID
-    const uid = 'mock_user';
+    final user = ref.read(currentUserProvider);
+    if (user == null) throw Exception('User not authenticated');
+    
     if (state.activeTripId != null) return;
 
     // Get current location to determine origin region and details
@@ -109,7 +110,7 @@ class TripController extends Notifier<TripState> {
 
     final repo = ref.read(tripRepositoryProvider);
     final id = await repo.startTrip(
-      uid: uid,
+      uid: user.id,
       mode: mode,
       purpose: purpose,
       originRegion: originRegion,
@@ -133,8 +134,8 @@ class TripController extends Notifier<TripState> {
 
   Future<void> stopManual() async {
     if (state.activeTripId == null) return;
-    // For now, use a mock user ID
-    const uid = 'mock_user';
+    final user = ref.read(currentUserProvider);
+    if (user == null) throw Exception('User not authenticated');
 
     // Get current location to determine destination region
     final currentPosition = ref
@@ -150,7 +151,7 @@ class TripController extends Notifier<TripState> {
     final repo = ref.read(tripRepositoryProvider);
     await _flushBuffer();
     await repo.updateSummary(
-      uid: uid,
+      uid: user.id,
       tripId: state.activeTripId!,
       endedAt: DateTime.now(),
       distanceMeters: state.distanceMeters,
@@ -172,6 +173,8 @@ class TripController extends Notifier<TripState> {
           endLocation: {'lat': endPos.latitude, 'lng': endPos.longitude},
           distanceKm: distanceKm,
           durationMin: durationMin,
+          mode: mode.name,
+          purpose: purpose.name,
           originRegion: null,
           destinationRegion: destinationRegion,
         );
@@ -284,11 +287,12 @@ class TripController extends Notifier<TripState> {
 
   Future<void> _flushPoints(List<TripPoint> points) async {
     if (state.activeTripId == null || points.isEmpty) return;
-    // For now, use a mock user ID
-    const uid = 'mock_user';
+    final user = ref.read(currentUserProvider);
+    if (user == null) return;
+    
     final repo = ref.read(tripRepositoryProvider);
     await repo.appendPoints(
-      uid: uid,
+      uid: user.id,
       tripId: state.activeTripId!,
       points: List.of(points),
     );

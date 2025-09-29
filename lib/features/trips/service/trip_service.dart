@@ -1,7 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../common/providers.dart';
-import '../data/supabase_trip_repository.dart';
+import '../data/trip_repository.dart';
 
 class TripService {
   final Ref ref;
@@ -43,8 +43,8 @@ class TripService {
     final generatedTripNumber = tripNumber ?? _generateTripNumber(now);
     final generatedChainId = chainId ?? _generateChainId(now);
 
-    final repository = ref.read(supabaseTripRepositoryProvider);
-    return await repository.saveTrip(
+    final repository = ref.read(tripRepositoryProvider);
+    return await repository.saveTripToSupabase(
       userId: user.id,
       startLocation: startLocation,
       endLocation: endLocation,
@@ -89,8 +89,8 @@ class TripService {
       throw Exception('User not authenticated');
     }
 
-    final repository = ref.read(supabaseTripRepositoryProvider);
-    return await repository.getUserTrips(user.id);
+    final repository = ref.read(tripRepositoryProvider);
+    return await repository.getUserTripsFromSupabase(user.id);
   }
 
   /// Get user's trips stream for real-time updates
@@ -100,8 +100,8 @@ class TripService {
       throw Exception('User not authenticated');
     }
 
-    final repository = ref.read(supabaseTripRepositoryProvider);
-    return repository.getUserTripsStream(user.id);
+    final repository = ref.read(tripRepositoryProvider);
+    return repository.getUserTripsStreamFromSupabase(user.id);
   }
 
   /// Get trip statistics
@@ -111,8 +111,8 @@ class TripService {
       throw Exception('User not authenticated');
     }
 
-    final repository = ref.read(supabaseTripRepositoryProvider);
-    return await repository.getTripStats(user.id);
+    final repository = ref.read(tripRepositoryProvider);
+    return await repository.getTripStatsFromSupabase(user.id);
   }
 
   /// Update a trip
@@ -132,8 +132,8 @@ class TripService {
       throw Exception('User not authenticated');
     }
 
-    final repository = ref.read(supabaseTripRepositoryProvider);
-    await repository.updateTrip(
+    final repository = ref.read(tripRepositoryProvider);
+    await repository.updateTripInSupabase(
       tripId: tripId,
       userId: user.id,
       startLocation: startLocation,
@@ -154,8 +154,8 @@ class TripService {
       throw Exception('User not authenticated');
     }
 
-    final repository = ref.read(supabaseTripRepositoryProvider);
-    await repository.deleteTrip(tripId: tripId, userId: user.id);
+    final repository = ref.read(tripRepositoryProvider);
+    await repository.deleteTripFromSupabase(tripId: tripId, userId: user.id);
   }
 }
 
