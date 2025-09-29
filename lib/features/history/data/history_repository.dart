@@ -1,5 +1,5 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+// Removed unused Supabase import
 
 import '../../../common/providers.dart';
 import '../../trips/domain/trip_models.dart';
@@ -8,12 +8,6 @@ class HistoryRepository {
   final Ref ref;
   HistoryRepository(this.ref);
 
-  CollectionReference<Map<String, dynamic>> _tripsCol(String uid) => ref
-      .read(firestoreProvider)
-      .collection('users')
-      .doc(uid)
-      .collection('trips');
-
   Stream<List<TripSummary>> getTrips({
     required String uid,
     DateTime? startDate,
@@ -21,26 +15,33 @@ class HistoryRepository {
     TripMode? mode,
     int limit = 50,
   }) {
-    Query<Map<String, dynamic>> query = _tripsCol(uid)
-        .orderBy('startedAt', descending: true)
+    final supabase = ref.read(supabaseProvider);
+
+    // Build query with all conditions
+    var query = supabase
+        .from('trips')
+        .select()
+        .eq('user_id', uid)
+        .order('timestamp', ascending: false)
         .limit(limit);
 
     if (startDate != null) {
-      query = query.where('startedAt', isGreaterThanOrEqualTo: startDate);
+      query = query.gte('timestamp', startDate.toIso8601String());
     }
     if (endDate != null) {
-      query = query.where('startedAt', isLessThanOrEqualTo: endDate);
+      query = query.lte('timestamp', endDate.toIso8601String());
     }
     if (mode != null) {
-      query = query.where('mode', isEqualTo: mode.toString());
+      query = query.eq('mode', mode.toString());
     }
 
-    return query.snapshots().map((snapshot) {
-      return snapshot.docs.map((doc) {
-        final data = doc.data();
-        return TripSummary.fromMap(data, doc.id);
-      }).toList();
+    return query.stream(primaryKey: ['id']).map((data) {
+      return data.map((trip) => TripSummary.fromMap(trip)).toList();
     });
+  }
+
+  Stream<List<TripSummary>> watchRecentTrips(String uid, {int limit = 50}) {
+    return getTrips(uid: uid, limit: limit);
   }
 
   Future<void> updateTrip({
@@ -54,39 +55,39 @@ class HistoryRepository {
     String? tripNumber,
     String? chainId,
   }) async {
+    final supabase = ref.read(supabaseProvider);
     final data = <String, dynamic>{};
-    
+
     if (mode != null) data['mode'] = mode.toString();
     if (purpose != null) data['purpose'] = purpose.toString();
     if (companions != null) data['companions'] = companions.toMap();
-    if (destinationRegion != null) data['destinationRegion'] = destinationRegion;
-    if (originRegion != null) data['originRegion'] = originRegion;
-    if (tripNumber != null) data['tripNumber'] = tripNumber;
-    if (chainId != null) data['chainId'] = chainId;
+    if (destinationRegion != null)
+      data['destination_region'] = destinationRegion;
+    if (originRegion != null) data['origin_region'] = originRegion;
+    if (tripNumber != null) data['trip_number'] = tripNumber;
+    if (chainId != null) data['chain_id'] = chainId;
 
     if (data.isNotEmpty) {
-      await _tripsCol(uid).doc(tripId).update(data);
+      await supabase
+          .from('trips')
+          .update(data)
+          .eq('id', tripId)
+          .eq('user_id', uid);
     }
   }
 
-  Future<void> deleteTrip({
-    required String uid,
-    required String tripId,
-  }) async {
+  Future<void> deleteTrip({required String uid, required String tripId}) async {
+    final supabase = ref.read(supabaseProvider);
+
+    // Delete trip points first
+    await supabase
+        .from('trip_points')
+        .delete()
+        .eq('trip_id', tripId)
+        .eq('user_id', uid);
+
     // Delete trip summary
-    await _tripsCol(uid).doc(tripId).delete();
-    
-    // Delete trip points
-    final pointsSnapshot = await _tripsCol(uid)
-        .doc(tripId)
-        .collection('points')
-        .get();
-    
-    final batch = ref.read(firestoreProvider).batch();
-    for (final doc in pointsSnapshot.docs) {
-      batch.delete(doc.reference);
-    }
-    await batch.commit();
+    await supabase.from('trips').delete().eq('id', tripId).eq('user_id', uid);
   }
 
   Future<void> batchUpdateTrips({
@@ -100,44 +101,49 @@ class HistoryRepository {
     String? tripNumber,
     String? chainId,
   }) async {
-    final batch = ref.read(firestoreProvider).batch();
-    
-    for (final tripId in tripIds) {
-      final data = <String, dynamic>{};
-      
-      if (mode != null) data['mode'] = mode.toString();
-      if (purpose != null) data['purpose'] = purpose.toString();
-      if (companions != null) data['companions'] = companions.toMap();
-      if (destinationRegion != null) data['destinationRegion'] = destinationRegion;
-      if (originRegion != null) data['originRegion'] = originRegion;
-      if (tripNumber != null) data['tripNumber'] = tripNumber;
-      if (chainId != null) data['chainId'] = chainId;
+    final supabase = ref.read(supabaseProvider);
+    final data = <String, dynamic>{};
 
-      if (data.isNotEmpty) {
-        batch.update(_tripsCol(uid).doc(tripId), data);
-      }
+    if (mode != null) data['mode'] = mode.toString();
+    if (purpose != null) data['purpose'] = purpose.toString();
+    if (companions != null) data['companions'] = companions.toMap();
+    if (destinationRegion != null)
+      data['destination_region'] = destinationRegion;
+    if (originRegion != null) data['origin_region'] = originRegion;
+    if (tripNumber != null) data['trip_number'] = tripNumber;
+    if (chainId != null) data['chain_id'] = chainId;
+
+    if (data.isNotEmpty) {
+      await supabase
+          .from('trips')
+          .update(data)
+          .inFilter('id', tripIds)
+          .eq('user_id', uid);
     }
-    
-    await batch.commit();
   }
 
   Future<void> batchDeleteTrips({
     required String uid,
     required List<String> tripIds,
   }) async {
-    final batch = ref.read(firestoreProvider).batch();
-    
-    for (final tripId in tripIds) {
-      // Delete trip summary
-      batch.delete(_tripsCol(uid).doc(tripId));
-      
-      // Note: Trip points will be deleted by Firestore rules or background cleanup
-    }
-    
-    await batch.commit();
+    final supabase = ref.read(supabaseProvider);
+
+    // Delete trip points first
+    await supabase
+        .from('trip_points')
+        .delete()
+        .inFilter('trip_id', tripIds)
+        .eq('user_id', uid);
+
+    // Delete trip summaries
+    await supabase
+        .from('trips')
+        .delete()
+        .inFilter('id', tripIds)
+        .eq('user_id', uid);
   }
 }
 
-final historyRepositoryProvider = Provider<HistoryRepository>((ref) => HistoryRepository(ref));
-
-
+final historyRepositoryProvider = Provider<HistoryRepository>(
+  (ref) => HistoryRepository(ref),
+);

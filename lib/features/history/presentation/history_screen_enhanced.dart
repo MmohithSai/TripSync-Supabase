@@ -12,7 +12,8 @@ class HistoryScreenEnhanced extends ConsumerStatefulWidget {
   const HistoryScreenEnhanced({super.key});
 
   @override
-  ConsumerState<HistoryScreenEnhanced> createState() => _HistoryScreenEnhancedState();
+  ConsumerState<HistoryScreenEnhanced> createState() =>
+      _HistoryScreenEnhancedState();
 }
 
 class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
@@ -21,13 +22,13 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
 
   @override
   Widget build(BuildContext context) {
-    final user = ref.watch(firebaseAuthProvider).currentUser;
+    final user = ref.watch(currentUserProvider);
     final l10n = ref.watch(appLocalizationsProvider);
-    
+
     if (user == null) {
       return Scaffold(body: Center(child: Text(l10n.notSignedIn)));
     }
-    
+
     final repo = ref.watch(tripRepositoryProvider);
 
     return Scaffold(
@@ -49,16 +50,32 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
               icon: const Icon(Icons.close),
               onPressed: _exitBatchMode,
             ),
-          ] else
+          ] else ...[
             IconButton(
               icon: const Icon(Icons.edit),
               onPressed: _enterBatchMode,
               tooltip: l10n.batchEdit,
             ),
+            // Export icon is only active for NATPAC; hidden otherwise
+            IconButton(
+              tooltip: 'Export (NATPAC only)',
+              onPressed: () async {
+                const isNatpac = false; // TODO: replace with secure role check
+                if (!isNatpac) return;
+                if (!context.mounted) return;
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const _NatpacExportScreen(),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.download),
+            ),
+          ],
         ],
       ),
       body: StreamBuilder<List<TripSummary>>(
-        stream: repo.watchRecentTrips(user.uid, limit: 100),
+        stream: repo.watchRecentTrips(user.id, limit: 100),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return Center(child: Text('Error: ${snapshot.error}'));
@@ -67,12 +84,12 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
             return const Center(child: CircularProgressIndicator());
           }
           final trips = snapshot.data!;
-          
+
           return Column(
             children: [
               // Weekly Summary Card
               _buildWeeklySummaryCard(trips, l10n),
-              
+
               // Trips List
               Expanded(
                 child: trips.isEmpty
@@ -83,7 +100,7 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
                         itemBuilder: (context, i) {
                           final trip = trips[i];
                           final isSelected = _selectedTrips.contains(trip.id);
-                          
+
                           return _buildTripTile(trip, isSelected, l10n);
                         },
                       ),
@@ -95,31 +112,37 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
     );
   }
 
-  Widget _buildWeeklySummaryCard(List<TripSummary> trips, AppLocalizations l10n) {
+  Widget _buildWeeklySummaryCard(
+    List<TripSummary> trips,
+    AppLocalizations l10n,
+  ) {
     final now = DateTime.now();
     final weekStart = now.subtract(Duration(days: now.weekday - 1));
     final weekEnd = weekStart.add(const Duration(days: 6));
-    
+
     final weeklyTrips = trips.where((trip) {
-      return trip.startedAt.isAfter(weekStart) && 
-             trip.startedAt.isBefore(weekEnd.add(const Duration(days: 1)));
+      return trip.startedAt.isAfter(weekStart) &&
+          trip.startedAt.isBefore(weekEnd.add(const Duration(days: 1)));
     }).toList();
-    
-    final totalDistance = weeklyTrips.fold<double>(0, (sum, trip) => sum + trip.distanceMeters);
+
+    final totalDistance = weeklyTrips.fold<double>(
+      0,
+      (sum, trip) => sum + trip.distanceMeters,
+    );
     final totalTrips = weeklyTrips.length;
-    
+
     // Calculate CO2 savings for the week
     double totalCO2 = 0;
     for (final trip in weeklyTrips) {
       totalCO2 += TripCalculator.calculateCO2Savings(trip);
     }
-    
+
     // Find most common mode
     final modeCounts = <TripMode, int>{};
     for (final trip in weeklyTrips) {
       modeCounts[trip.mode] = (modeCounts[trip.mode] ?? 0) + 1;
     }
-    final topMode = modeCounts.isNotEmpty 
+    final topMode = modeCounts.isNotEmpty
         ? modeCounts.entries.reduce((a, b) => a.value > b.value ? a : b).key
         : TripMode.unknown;
 
@@ -187,7 +210,12 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
     );
   }
 
-  Widget _buildSummaryItem(String label, String value, IconData icon, [Color? color]) {
+  Widget _buildSummaryItem(
+    String label,
+    String value,
+    IconData icon, [
+    Color? color,
+  ]) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -197,10 +225,7 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
             const SizedBox(width: 4),
             Text(
               label,
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey[600],
-              ),
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
             ),
           ],
         ),
@@ -217,14 +242,21 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
     );
   }
 
-  Widget _buildTripTile(TripSummary trip, bool isSelected, AppLocalizations l10n) {
-    final title = [trip.originRegion, trip.destinationRegion]
-        .where((e) => (e ?? '').isNotEmpty)
-        .join(' → ');
-    final duration = trip.endedAt == null 
-        ? null 
+  Widget _buildTripTile(
+    TripSummary trip,
+    bool isSelected,
+    AppLocalizations l10n,
+  ) {
+    final title = [
+      trip.originRegion,
+      trip.destinationRegion,
+    ].where((e) => (e ?? '').isNotEmpty).join(' → ');
+    final duration = trip.endedAt == null
+        ? null
         : trip.endedAt!.difference(trip.startedAt);
-    final durationStr = duration == null ? l10n.ongoing : _formatDuration(duration);
+    final durationStr = duration == null
+        ? l10n.ongoing
+        : _formatDuration(duration);
 
     return ListTile(
       leading: _isBatchMode
@@ -237,7 +269,9 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('${l10n.mode}: ${_getModeName(trip.mode, l10n)} • ${l10n.distance}: ${trip.distanceMeters.toStringAsFixed(0)} m • ${l10n.time}: $durationStr'),
+          Text(
+            '${l10n.mode}: ${_getModeName(trip.mode, l10n)} • ${l10n.distance}: ${trip.distanceMeters.toStringAsFixed(0)} m • ${l10n.time}: $durationStr',
+          ),
           const SizedBox(height: 4),
           FutureBuilder<Map<String, dynamic>>(
             future: _calculateTripData(trip),
@@ -245,18 +279,22 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
               if (snapshot.hasData) {
                 final co2Savings = snapshot.data!['co2'] ?? 0.0;
                 final cost = snapshot.data!['cost'] ?? 0.0;
-                
+
                 return Row(
                   children: [
                     Icon(Icons.eco, size: 16, color: Colors.green[600]),
                     const SizedBox(width: 4),
-                    Text('${TripCalculator.formatCO2(co2Savings)} ${l10n.saved}', 
-                         style: TextStyle(color: Colors.green[600], fontSize: 12)),
+                    Text(
+                      '${TripCalculator.formatCO2(co2Savings)} ${l10n.saved}',
+                      style: TextStyle(color: Colors.green[600], fontSize: 12),
+                    ),
                     const SizedBox(width: 12),
                     Icon(Icons.attach_money, size: 16, color: Colors.blue[600]),
                     const SizedBox(width: 4),
-                    Text(TripCalculator.formatCost(cost), 
-                         style: TextStyle(color: Colors.blue[600], fontSize: 12)),
+                    Text(
+                      TripCalculator.formatCost(cost),
+                      style: TextStyle(color: Colors.blue[600], fontSize: 12),
+                    ),
                   ],
                 );
               }
@@ -266,7 +304,7 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
         ],
       ),
       trailing: _isBatchMode ? null : const Icon(Icons.edit_outlined),
-      onTap: _isBatchMode 
+      onTap: _isBatchMode
           ? () => _toggleTripSelection(trip.id)
           : () => _editTrip(context, ref, trip),
     );
@@ -274,14 +312,22 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
 
   String _getModeName(TripMode mode, AppLocalizations l10n) {
     switch (mode) {
-      case TripMode.walk: return l10n.walk;
-      case TripMode.bicycle: return l10n.bicycle;
-      case TripMode.car: return l10n.car;
-      case TripMode.bus: return l10n.bus;
-      case TripMode.train: return l10n.train;
-      case TripMode.metro: return l10n.metro;
-      case TripMode.scooter: return l10n.scooter;
-      default: return l10n.unknown;
+      case TripMode.walk:
+        return l10n.walk;
+      case TripMode.bicycle:
+        return l10n.bicycle;
+      case TripMode.car:
+        return l10n.car;
+      case TripMode.bus:
+        return l10n.bus;
+      case TripMode.train:
+        return l10n.train;
+      case TripMode.metro:
+        return l10n.metro;
+      case TripMode.scooter:
+        return l10n.scooter;
+      default:
+        return l10n.unknown;
     }
   }
 
@@ -337,13 +383,15 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
 
   void _batchEditTrips() {
     if (_selectedTrips.isEmpty) return;
-    
+
     final l10n = ref.read(appLocalizationsProvider);
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: Text(l10n.batchEdit),
-        content: Text('${l10n.updateSelected} ${_selectedTrips.length} ${l10n.trip.toLowerCase()}s?'),
+        content: Text(
+          '${l10n.updateSelected} ${_selectedTrips.length} ${l10n.trip.toLowerCase()}s?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -362,22 +410,28 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
     );
   }
 
-  Future<void> _editTrip(BuildContext context, WidgetRef ref, TripSummary trip) async {
-    final user = ref.read(firebaseAuthProvider).currentUser;
+  Future<void> _editTrip(
+    BuildContext context,
+    WidgetRef ref,
+    TripSummary trip,
+  ) async {
+    final user = ref.read(currentUserProvider);
     if (user == null) return;
-    
+
     final repo = ref.read(tripRepositoryProvider);
     final l10n = ref.read(appLocalizationsProvider);
-    
+
     final originCtrl = TextEditingController(text: trip.originRegion ?? '');
     final destCtrl = TextEditingController(text: trip.destinationRegion ?? '');
     final tripNumCtrl = TextEditingController(text: trip.tripNumber ?? '');
     final chainCtrl = TextEditingController(text: trip.chainId ?? '');
-    final relationshipCtrl = TextEditingController(text: trip.companions.relationship ?? '');
+    final relationshipCtrl = TextEditingController(
+      text: trip.companions.relationship ?? '',
+    );
     int adults = trip.companions.adults;
     int children = trip.companions.children;
     int seniors = trip.companions.seniors;
-    
+
     // Calculate environmental impact
     final co2Savings = TripCalculator.calculateCO2Savings(trip);
     final cost = await TripCalculator.calculateCost(trip);
@@ -401,7 +455,10 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(l10n.editTrip, style: Theme.of(context).textTheme.titleMedium),
+                    Text(
+                      l10n.editTrip,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
                     const SizedBox(height: 12),
                     // Environmental impact card
                     Card(
@@ -415,8 +472,13 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
                               children: [
                                 Icon(Icons.eco, color: Colors.green[600]),
                                 const SizedBox(width: 8),
-                                Text(l10n.environmentalImpact, 
-                                     style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green[700])),
+                                Text(
+                                  l10n.environmentalImpact,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.green[700],
+                                  ),
+                                ),
                               ],
                             ),
                             const SizedBox(height: 8),
@@ -426,25 +488,61 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
                                 Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(l10n.co2Saved, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-                                    Text(TripCalculator.formatCO2(co2Savings), 
-                                         style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green[700])),
+                                    Text(
+                                      l10n.co2Saved,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey[600],
+                                      ),
+                                    ),
+                                    Text(
+                                      TripCalculator.formatCO2(co2Savings),
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.green[700],
+                                      ),
+                                    ),
                                   ],
                                 ),
                                 Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(l10n.cost, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-                                    Text(TripCalculator.formatCost(cost), 
-                                         style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue[700])),
+                                    Text(
+                                      l10n.cost,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey[600],
+                                      ),
+                                    ),
+                                    Text(
+                                      TripCalculator.formatCost(cost),
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.blue[700],
+                                      ),
+                                    ),
                                   ],
                                 ),
                                 Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(l10n.impact, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-                                    Text(TripCalculator.getEnvironmentalImpact(co2Savings), 
-                                         style: TextStyle(fontWeight: FontWeight.bold, color: Colors.orange[700], fontSize: 10)),
+                                    Text(
+                                      l10n.impact,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey[600],
+                                      ),
+                                    ),
+                                    Text(
+                                      TripCalculator.getEnvironmentalImpact(
+                                        co2Savings,
+                                      ),
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.orange[700],
+                                        fontSize: 10,
+                                      ),
+                                    ),
                                   ],
                                 ),
                               ],
@@ -454,55 +552,123 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    TextField(controller: originCtrl, decoration: InputDecoration(labelText: l10n.originRegion)), 
+                    TextField(
+                      controller: originCtrl,
+                      decoration: InputDecoration(labelText: l10n.originRegion),
+                    ),
                     const SizedBox(height: 8),
-                    TextField(controller: destCtrl, decoration: InputDecoration(labelText: l10n.destinationRegion)), 
+                    TextField(
+                      controller: destCtrl,
+                      decoration: InputDecoration(
+                        labelText: l10n.destinationRegion,
+                      ),
+                    ),
                     const SizedBox(height: 8),
-                    TextField(controller: tripNumCtrl, decoration: InputDecoration(labelText: l10n.tripNumber)), 
+                    TextField(
+                      controller: tripNumCtrl,
+                      decoration: InputDecoration(labelText: l10n.tripNumber),
+                    ),
                     const SizedBox(height: 8),
-                    TextField(controller: chainCtrl, decoration: InputDecoration(labelText: l10n.chainId)), 
+                    TextField(
+                      controller: chainCtrl,
+                      decoration: InputDecoration(labelText: l10n.chainId),
+                    ),
                     const SizedBox(height: 12),
-                    Text(l10n.passengers, style: Theme.of(context).textTheme.titleSmall),
-                    Row(children: [
-                      Expanded(child: Text(l10n.adults)),
-                      IconButton(onPressed: () => setState(() => adults = adults > 0 ? adults - 1 : 0), icon: const Icon(Icons.remove_circle_outline)),
-                      Text('$adults'),
-                      IconButton(onPressed: () => setState(() => adults = adults + 1), icon: const Icon(Icons.add_circle_outline)),
-                    ]),
-                    Row(children: [
-                      Expanded(child: Text(l10n.children)),
-                      IconButton(onPressed: () => setState(() => children = children > 0 ? children - 1 : 0), icon: const Icon(Icons.remove_circle_outline)),
-                      Text('$children'),
-                      IconButton(onPressed: () => setState(() => children = children + 1), icon: const Icon(Icons.add_circle_outline)),
-                    ]),
-                    Row(children: [
-                      Expanded(child: Text(l10n.seniors)),
-                      IconButton(onPressed: () => setState(() => seniors = seniors > 0 ? seniors - 1 : 0), icon: const Icon(Icons.remove_circle_outline)),
-                      Text('$seniors'),
-                      IconButton(onPressed: () => setState(() => seniors = seniors + 1), icon: const Icon(Icons.add_circle_outline)),
-                    ]),
+                    Text(
+                      l10n.passengers,
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    Row(
+                      children: [
+                        Expanded(child: Text(l10n.adults)),
+                        IconButton(
+                          onPressed: () => setState(
+                            () => adults = adults > 0 ? adults - 1 : 0,
+                          ),
+                          icon: const Icon(Icons.remove_circle_outline),
+                        ),
+                        Text('$adults'),
+                        IconButton(
+                          onPressed: () => setState(() => adults = adults + 1),
+                          icon: const Icon(Icons.add_circle_outline),
+                        ),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        Expanded(child: Text(l10n.children)),
+                        IconButton(
+                          onPressed: () => setState(
+                            () => children = children > 0 ? children - 1 : 0,
+                          ),
+                          icon: const Icon(Icons.remove_circle_outline),
+                        ),
+                        Text('$children'),
+                        IconButton(
+                          onPressed: () =>
+                              setState(() => children = children + 1),
+                          icon: const Icon(Icons.add_circle_outline),
+                        ),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        Expanded(child: Text(l10n.seniors)),
+                        IconButton(
+                          onPressed: () => setState(
+                            () => seniors = seniors > 0 ? seniors - 1 : 0,
+                          ),
+                          icon: const Icon(Icons.remove_circle_outline),
+                        ),
+                        Text('$seniors'),
+                        IconButton(
+                          onPressed: () =>
+                              setState(() => seniors = seniors + 1),
+                          icon: const Icon(Icons.add_circle_outline),
+                        ),
+                      ],
+                    ),
                     const SizedBox(height: 8),
-                    TextField(controller: relationshipCtrl, decoration: InputDecoration(labelText: l10n.companionRelationship)),
+                    TextField(
+                      controller: relationshipCtrl,
+                      decoration: InputDecoration(
+                        labelText: l10n.companionRelationship,
+                      ),
+                    ),
                     const SizedBox(height: 12),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
-                        TextButton(onPressed: () => Navigator.pop(context), child: Text(l10n.cancel)),
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: Text(l10n.cancel),
+                        ),
                         const SizedBox(width: 8),
                         FilledButton(
                           onPressed: () async {
                             await repo.updateSummary(
-                              uid: user.uid,
+                              uid: user.id,
                               tripId: trip.id,
-                              originRegion: originCtrl.text.trim().isEmpty ? null : originCtrl.text.trim(),
-                              destinationRegion: destCtrl.text.trim().isEmpty ? null : destCtrl.text.trim(),
-                              tripNumber: tripNumCtrl.text.trim().isEmpty ? null : tripNumCtrl.text.trim(),
-                              chainId: chainCtrl.text.trim().isEmpty ? null : chainCtrl.text.trim(),
+                              originRegion: originCtrl.text.trim().isEmpty
+                                  ? null
+                                  : originCtrl.text.trim(),
+                              destinationRegion: destCtrl.text.trim().isEmpty
+                                  ? null
+                                  : destCtrl.text.trim(),
+                              tripNumber: tripNumCtrl.text.trim().isEmpty
+                                  ? null
+                                  : tripNumCtrl.text.trim(),
+                              chainId: chainCtrl.text.trim().isEmpty
+                                  ? null
+                                  : chainCtrl.text.trim(),
                               companions: Companions(
                                 adults: adults,
                                 children: children,
                                 seniors: seniors,
-                                relationship: relationshipCtrl.text.trim().isEmpty ? null : relationshipCtrl.text.trim(),
+                                relationship:
+                                    relationshipCtrl.text.trim().isEmpty
+                                    ? null
+                                    : relationshipCtrl.text.trim(),
                               ),
                             );
                             if (context.mounted) Navigator.pop(context);
@@ -510,7 +676,7 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
                           child: Text(l10n.save),
                         ),
                       ],
-                    )
+                    ),
                   ],
                 ),
               );
@@ -522,8 +688,19 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
   }
 }
 
+class _NatpacExportScreen extends ConsumerWidget {
+  const _NatpacExportScreen({super.key});
 
-
-
-
-
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('NATPAC Export')),
+      body: const Padding(
+        padding: EdgeInsets.all(16),
+        child: Text(
+          'Export CSV/JSON of trips with fields needed for planning.',
+        ),
+      ),
+    );
+  }
+}

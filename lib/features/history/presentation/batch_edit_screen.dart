@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../trips/domain/trip_models.dart';
 import '../../trips/data/trip_repository.dart';
 import '../data/history_repository.dart';
+import '../../../common/providers.dart';
 
 class BatchEditScreen extends ConsumerStatefulWidget {
   final List<String> selectedTripIds;
@@ -364,23 +365,18 @@ class _BatchEditScreenState extends ConsumerState<BatchEditScreen> {
         }
 
         // Apply changes to all selected trips
-        final user = ref.read(firebaseAuthProvider).currentUser;
+        final user = ref.read(currentUserProvider);
         if (user != null) {
           await repository.batchUpdateTrips(
-            uid: user.uid,
+            uid: user.id,
             tripIds: widget.selectedTripIds,
-            mode: _mode != null ? TripMode.values.firstWhere((m) => m.toString() == _mode) : null,
-            purpose: _purpose != null ? TripPurpose.values.firstWhere((p) => p.toString() == _purpose) : null,
-            companions: _companions != null ? Companions(
-              adults: _companions!['adults'] ?? 0,
-              children: _companions!['children'] ?? 0,
-              seniors: _companions!['seniors'] ?? 0,
-              relationship: _companions!['relationship'],
-            ) : null,
+            mode: _selectedMode != null ? TripMode.values.firstWhere((m) => m.toString() == _selectedMode) : null,
+            purpose: _selectedPurpose != null ? TripPurpose.values.firstWhere((p) => p.toString() == _selectedPurpose) : null,
+            companions: null, // Companions not implemented in this screen
             destinationRegion: _destinationRegion,
             originRegion: _originRegion,
-            tripNumber: _tripNumber,
-            chainId: _chainId,
+            tripNumber: null, // Trip number not implemented in this screen
+            chainId: null, // Chain ID not implemented in this screen
           );
         }
 

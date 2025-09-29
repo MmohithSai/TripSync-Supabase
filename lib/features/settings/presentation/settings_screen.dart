@@ -15,7 +15,7 @@ class SettingsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final locationState = ref.watch(locationControllerProvider);
-    final auth = ref.watch(firebaseAuthProvider);
+    final user = ref.watch(currentUserProvider);
     final controller = ref.read(locationControllerProvider.notifier);
     final l10n = ref.watch(appLocalizationsProvider);
     final currentLocale = ref.watch(localeProvider);
@@ -79,7 +79,8 @@ class SettingsScreen extends ConsumerWidget {
             title: Text(l10n.signOut),
             leading: const Icon(Icons.logout),
             onTap: () async {
-              await auth.signOut();
+              final supabase = ref.read(supabaseProvider);
+              await supabase.auth.signOut();
             },
           ),
         ],

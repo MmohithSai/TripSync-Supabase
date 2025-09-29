@@ -13,7 +13,7 @@ class HistoryScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final user = ref.watch(firebaseAuthProvider).currentUser;
+    final user = ref.watch(currentUserProvider);
     if (user == null) {
       return const Scaffold(body: Center(child: Text('Not signed in')));
     }
@@ -22,7 +22,7 @@ class HistoryScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('History')),
       body: StreamBuilder<List<TripSummary>>( 
-        stream: repo.watchRecentTrips(user.uid, limit: 100),
+        stream: repo.watchRecentTrips(user.id, limit: 100),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return Center(child: Text('Error: ${snapshot.error}'));
@@ -75,7 +75,7 @@ class HistoryScreen extends ConsumerWidget {
                     ),
                     trailing: const Icon(Icons.edit_outlined),
                     onTap: () async {
-                      await _editTrip(context, ref, user.uid, t);
+                      await _editTrip(context, ref, user.id, t);
                     },
                   );
                 },

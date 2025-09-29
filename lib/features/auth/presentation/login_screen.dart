@@ -1,6 +1,6 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../common/providers.dart';
 
@@ -24,19 +24,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _error = null;
     });
     try {
-      final auth = ref.read(firebaseAuthProvider);
+      final supabase = ref.read(supabaseProvider);
       if (_isLogin) {
-        await auth.signInWithEmailAndPassword(
+        await supabase.auth.signInWithPassword(
           email: _email.text.trim(),
           password: _password.text,
         );
       } else {
-        await auth.createUserWithEmailAndPassword(
+        await supabase.auth.signUp(
           email: _email.text.trim(),
           password: _password.text,
         );
       }
-    } on FirebaseAuthException catch (e) {
+    } on AuthException catch (e) {
       setState(() => _error = e.message);
     } catch (e) {
       setState(() => _error = e.toString());
@@ -83,16 +83,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ? null
                   : () => setState(() => _isLogin = !_isLogin),
               child: Text(
-                _isLogin ? 'Need an account? Register' : 'Have an account? Login',
+                _isLogin
+                    ? 'Need an account? Register'
+                    : 'Have an account? Login',
               ),
-            )
+            ),
           ],
         ),
       ),
     );
   }
 }
-
-
-
-

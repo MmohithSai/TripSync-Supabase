@@ -1,19 +1,14 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-final firebaseAuthProvider = Provider<FirebaseAuth>((ref) {
-  return FirebaseAuth.instance;
+final supabaseProvider = Provider<SupabaseClient>((ref) {
+  return Supabase.instance.client;
 });
 
-final firestoreProvider = Provider<FirebaseFirestore>((ref) {
-  return FirebaseFirestore.instance;
+final authStateChangesProvider = StreamProvider<AuthState>((ref) {
+  return ref.watch(supabaseProvider).auth.onAuthStateChange;
 });
 
-final authStateChangesProvider = StreamProvider<User?>((ref) {
-  return ref.watch(firebaseAuthProvider).authStateChanges();
+final currentUserProvider = Provider<User?>((ref) {
+  return ref.watch(supabaseProvider).auth.currentUser;
 });
-
-
-
-

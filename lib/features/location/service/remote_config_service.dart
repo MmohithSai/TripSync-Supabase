@@ -1,5 +1,3 @@
-import 'dart:convert';
-import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 class TripDetectionConfig {
@@ -25,12 +23,17 @@ class TripDetectionConfig {
 
   factory TripDetectionConfig.fromMap(Map<String, dynamic> map) {
     return TripDetectionConfig(
-      autoStartSpeedThreshold: (map['autoStartSpeedThreshold'] as num?)?.toDouble() ?? 1.2,
-      autoStartTimeThreshold: (map['autoStartTimeThreshold'] as num?)?.toInt() ?? 120,
-      stopRadiusThreshold: (map['stopRadiusThreshold'] as num?)?.toDouble() ?? 50.0,
+      autoStartSpeedThreshold:
+          (map['autoStartSpeedThreshold'] as num?)?.toDouble() ?? 1.2,
+      autoStartTimeThreshold:
+          (map['autoStartTimeThreshold'] as num?)?.toInt() ?? 120,
+      stopRadiusThreshold:
+          (map['stopRadiusThreshold'] as num?)?.toDouble() ?? 50.0,
       stopTimeThreshold: (map['stopTimeThreshold'] as num?)?.toInt() ?? 180,
-      minDistanceThreshold: (map['minDistanceThreshold'] as num?)?.toDouble() ?? 150.0,
-      minDurationThreshold: (map['minDurationThreshold'] as num?)?.toInt() ?? 300,
+      minDistanceThreshold:
+          (map['minDistanceThreshold'] as num?)?.toDouble() ?? 150.0,
+      minDurationThreshold:
+          (map['minDurationThreshold'] as num?)?.toInt() ?? 300,
       distanceFilter: (map['distanceFilter'] as num?)?.toDouble() ?? 25.0,
       intervalDuration: (map['intervalDuration'] as num?)?.toInt() ?? 5,
     );
@@ -51,8 +54,6 @@ class TripDetectionConfig {
 }
 
 class RemoteConfigService {
-  static final FirebaseRemoteConfig _remoteConfig = FirebaseRemoteConfig.instance;
-  
   static const TripDetectionConfig _defaultConfig = TripDetectionConfig(
     autoStartSpeedThreshold: 1.2,
     autoStartTimeThreshold: 120,
@@ -65,50 +66,22 @@ class RemoteConfigService {
   );
 
   static Future<void> initialize() async {
-    await _remoteConfig.setConfigSettings(RemoteConfigSettings(
-      fetchTimeout: const Duration(minutes: 1),
-      minimumFetchInterval: const Duration(hours: 1),
-    ));
-
-    // Set default values as individual parameters to avoid Map issues
-    await _remoteConfig.setDefaults({
-      'autoStartSpeedThreshold': _defaultConfig.autoStartSpeedThreshold,
-      'autoStartTimeThreshold': _defaultConfig.autoStartTimeThreshold,
-      'stopRadiusThreshold': _defaultConfig.stopRadiusThreshold,
-      'stopTimeThreshold': _defaultConfig.stopTimeThreshold,
-      'minDistanceThreshold': _defaultConfig.minDistanceThreshold,
-      'minDurationThreshold': _defaultConfig.minDurationThreshold,
-      'distanceFilter': _defaultConfig.distanceFilter,
-      'intervalDuration': _defaultConfig.intervalDuration,
-    });
-
-    // Fetch and activate
-    await _remoteConfig.fetchAndActivate();
+    // TODO: Implement Supabase Edge Function or local storage for remote config
+    // For now, using default values
   }
 
   static TripDetectionConfig getTripDetectionConfig() {
-    try {
-      return TripDetectionConfig(
-        autoStartSpeedThreshold: _remoteConfig.getDouble('autoStartSpeedThreshold'),
-        autoStartTimeThreshold: _remoteConfig.getInt('autoStartTimeThreshold'),
-        stopRadiusThreshold: _remoteConfig.getDouble('stopRadiusThreshold'),
-        stopTimeThreshold: _remoteConfig.getInt('stopTimeThreshold'),
-        minDistanceThreshold: _remoteConfig.getDouble('minDistanceThreshold'),
-        minDurationThreshold: _remoteConfig.getInt('minDurationThreshold'),
-        distanceFilter: _remoteConfig.getDouble('distanceFilter'),
-        intervalDuration: _remoteConfig.getInt('intervalDuration'),
-      );
-    } catch (e) {
-      return _defaultConfig;
-    }
+    // TODO: Fetch from Supabase or local storage
+    return _defaultConfig;
   }
 
   static Future<void> refresh() async {
-    await _remoteConfig.fetchAndActivate();
+    // TODO: Implement refresh from Supabase
   }
 
   static Stream<TripDetectionConfig> watchTripDetectionConfig() {
-    return _remoteConfig.onConfigUpdated.map((_) => getTripDetectionConfig());
+    // TODO: Implement real-time updates from Supabase
+    return Stream.value(_defaultConfig);
   }
 }
 
@@ -119,5 +92,3 @@ final tripDetectionConfigProvider = StreamProvider<TripDetectionConfig>((ref) {
 final currentTripDetectionConfigProvider = Provider<TripDetectionConfig>((ref) {
   return RemoteConfigService.getTripDetectionConfig();
 });
-
-

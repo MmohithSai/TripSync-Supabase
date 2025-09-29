@@ -4,20 +4,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../common/providers.dart';
 import '../domain/itinerary_models.dart';
 import '../data/itinerary_repository.dart';
-import 'trip_suggestions_screen.dart';
+import 'manual_itinerary_creation_screen.dart';
 
 class ItineraryScreen extends ConsumerWidget {
   final String? tripId;
 
-  const ItineraryScreen({
-    super.key,
-    this.tripId,
-  });
+  const ItineraryScreen({super.key, this.tripId});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final user = ref.watch(firebaseAuthProvider).currentUser;
-    
+    final user = ref.watch(currentUserProvider);
+
     if (user == null) {
       return const Scaffold(
         body: Center(child: Text('Please log in to view itineraries')),
@@ -35,27 +32,33 @@ class ItineraryScreen extends ConsumerWidget {
         ],
       ),
       body: tripId != null
-          ? _buildTripItineraries(context, ref, user.uid)
-          : _buildAllItineraries(context, ref, user.uid),
+          ? _buildTripItineraries(context, ref, user.id)
+          : _buildAllItineraries(context, ref, user.id),
     );
   }
 
-  Widget _buildTripItineraries(BuildContext context, WidgetRef ref, String uid) {
-    final itinerariesStream = ref.watch(itineraryRepositoryProvider).getTripItineraries(uid, tripId!);
-    
+  Widget _buildTripItineraries(
+    BuildContext context,
+    WidgetRef ref,
+    String uid,
+  ) {
+    final itinerariesStream = ref
+        .watch(itineraryRepositoryProvider)
+        .getTripItineraries(uid, tripId!);
+
     return StreamBuilder<List<TripItinerary>>(
       stream: itinerariesStream,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
-        
+
         if (snapshot.hasError) {
           return Center(child: Text('Error: ${snapshot.error}'));
         }
-        
+
         final itineraries = snapshot.data ?? [];
-        
+
         if (itineraries.isEmpty) {
           return Center(
             child: Column(
@@ -82,7 +85,7 @@ class ItineraryScreen extends ConsumerWidget {
             ),
           );
         }
-        
+
         return ListView.builder(
           itemCount: itineraries.length,
           itemBuilder: (context, index) {
@@ -95,21 +98,23 @@ class ItineraryScreen extends ConsumerWidget {
   }
 
   Widget _buildAllItineraries(BuildContext context, WidgetRef ref, String uid) {
-    final itinerariesStream = ref.watch(itineraryRepositoryProvider).getUserItineraries(uid);
-    
+    final itinerariesStream = ref
+        .watch(itineraryRepositoryProvider)
+        .getUserItineraries(uid);
+
     return StreamBuilder<List<TripItinerary>>(
       stream: itinerariesStream,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
-        
+
         if (snapshot.hasError) {
           return Center(child: Text('Error: ${snapshot.error}'));
         }
-        
+
         final itineraries = snapshot.data ?? [];
-        
+
         if (itineraries.isEmpty) {
           return Center(
             child: Column(
@@ -136,7 +141,7 @@ class ItineraryScreen extends ConsumerWidget {
             ),
           );
         }
-        
+
         return ListView.builder(
           itemCount: itineraries.length,
           itemBuilder: (context, index) {
@@ -148,11 +153,17 @@ class ItineraryScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildItineraryCard(BuildContext context, WidgetRef ref, TripItinerary itinerary) {
-    final completedItems = itinerary.items.where((item) => item.isCompleted).length;
+  Widget _buildItineraryCard(
+    BuildContext context,
+    WidgetRef ref,
+    TripItinerary itinerary,
+  ) {
+    final completedItems = itinerary.items
+        .where((item) => item.isCompleted)
+        .length;
     final totalItems = itinerary.items.length;
     final progress = totalItems > 0 ? completedItems / totalItems : 0.0;
-    
+
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Padding(
@@ -200,7 +211,9 @@ class ItineraryScreen extends ConsumerWidget {
                 const SizedBox(width: 16),
                 Icon(Icons.straighten, color: Colors.green[600], size: 16),
                 const SizedBox(width: 4),
-                Text('${(itinerary.totalDistance / 1000).toStringAsFixed(1)} km'),
+                Text(
+                  '${(itinerary.totalDistance / 1000).toStringAsFixed(1)} km',
+                ),
               ],
             ),
             const SizedBox(height: 8),
@@ -214,30 +227,16 @@ class ItineraryScreen extends ConsumerWidget {
             const SizedBox(height: 8),
             Text(
               '$completedItems of $totalItems completed',
-              style: TextStyle(
-                color: Colors.grey[600],
-                fontSize: 12,
-              ),
+              style: TextStyle(color: Colors.grey[600], fontSize: 12),
             ),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => _viewItineraryDetails(context, ref, itinerary),
-                    icon: const Icon(Icons.visibility),
-                    label: const Text('View Details'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: () => _addMorePlaces(context, ref),
-                    icon: const Icon(Icons.add_location),
-                    label: const Text('Add Places'),
-                  ),
-                ),
-              ],
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => _viewItineraryDetails(context, ref, itinerary),
+                icon: const Icon(Icons.visibility),
+                label: const Text('View Details'),
+              ),
             ),
           ],
         ),
@@ -246,79 +245,39 @@ class ItineraryScreen extends ConsumerWidget {
   }
 
   void _showCreateItineraryDialog(BuildContext context, WidgetRef ref) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Create New Itinerary'),
-        content: const Text('Would you like to discover nearby places to add to your itinerary?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              _discoverPlaces(context, ref);
-            },
-            child: const Text('Discover Places'),
-          ),
-        ],
-      ),
-    );
+    _createManualItinerary(context, ref);
   }
 
-  void _discoverPlaces(BuildContext context, WidgetRef ref) {
+  void _createManualItinerary(BuildContext context, WidgetRef ref) {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (context) => TripSuggestionsScreen(
-          tripId: tripId,
-        ),
+        builder: (context) => ManualItineraryCreationScreen(tripId: tripId),
       ),
     );
   }
 
-  void _viewItineraryDetails(BuildContext context, WidgetRef ref, TripItinerary itinerary) {
+  void _viewItineraryDetails(
+    BuildContext context,
+    WidgetRef ref,
+    TripItinerary itinerary,
+  ) {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => ItineraryDetailsScreen(itinerary: itinerary),
       ),
     );
   }
-
-  void _addMorePlaces(BuildContext context, WidgetRef ref) {
-    _discoverPlaces(context, ref);
-  }
 }
 
 class ItineraryDetailsScreen extends ConsumerWidget {
   final TripItinerary itinerary;
 
-  const ItineraryDetailsScreen({
-    super.key,
-    required this.itinerary,
-  });
+  const ItineraryDetailsScreen({super.key, required this.itinerary});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(itinerary.title),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (context) => TripSuggestionsScreen(
-                    tripId: itinerary.tripId,
-                  ),
-                ),
-              );
-            },
-          ),
-        ],
-      ),
+      appBar: AppBar(title: Text(itinerary.title)),
       body: ListView.builder(
         itemCount: itinerary.items.length,
         itemBuilder: (context, index) {
@@ -329,7 +288,11 @@ class ItineraryDetailsScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildItineraryItemCard(BuildContext context, WidgetRef ref, ItineraryItem item) {
+  Widget _buildItineraryItemCard(
+    BuildContext context,
+    WidgetRef ref,
+    ItineraryItem item,
+  ) {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: ListTile(
@@ -368,14 +331,16 @@ class ItineraryDetailsScreen extends ConsumerWidget {
           value: item.isCompleted,
           onChanged: (value) {
             // Mark item as completed
-            final user = ref.read(firebaseAuthProvider).currentUser;
+            final user = ref.read(currentUserProvider);
             if (user != null) {
-              ref.read(itineraryRepositoryProvider).markItemCompleted(
-                uid: user.uid,
-                itineraryId: itinerary.id,
-                itemId: item.id,
-                isCompleted: value ?? false,
-              );
+              ref
+                  .read(itineraryRepositoryProvider)
+                  .markItemCompleted(
+                    uid: user.id,
+                    itineraryId: itinerary.id,
+                    itemId: item.id,
+                    isCompleted: value ?? false,
+                  );
             }
           },
         ),
@@ -386,5 +351,3 @@ class ItineraryDetailsScreen extends ConsumerWidget {
     );
   }
 }
-
-

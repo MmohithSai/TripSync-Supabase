@@ -98,13 +98,59 @@ class LocalLocationQueue {
     final toDelete = c - maxRows;
     // Delete the oldest rows
     await db.rawDelete('DELETE FROM $_table WHERE id IN (SELECT id FROM $_table ORDER BY id ASC LIMIT ?)', [toDelete]);
+    
+    // Vacuum the database to reclaim space
+    await db.execute('VACUUM');
   }
 
   Future<void> cleanupOldEntries() async {
     final db = await _open();
-    // Remove entries older than 3 days to save storage
-    final cutoffTime = DateTime.now().subtract(const Duration(days: 3)).millisecondsSinceEpoch;
+    // Remove entries older than 2 days to save storage (reduced from 3 days)
+    final cutoffTime = DateTime.now().subtract(const Duration(days: 2)).millisecondsSinceEpoch;
     await db.delete(_table, where: 'timestamp_ms < ?', whereArgs: [cutoffTime]);
+    
+    // Vacuum after cleanup to reclaim space
+    await db.execute('VACUUM');
+  }
+  
+  /// Get storage usage statistics
+  Future<Map<String, int>> getStorageStats() async {
+    final db = await _open();
+    final countResult = await db.rawQuery('SELECT COUNT(*) as count FROM $_table');
+    final count = countResult.first['count'] as int;
+    
+    final sizeResult = await db.rawQuery('SELECT page_count * page_size as size FROM pragma_page_count(), pragma_page_size()');
+    final size = sizeResult.first['size'] as int;
+    
+    return {
+      'rowCount': count,
+      'sizeBytes': size,
+    };
+  }
+  
+  /// Optimize storage by removing duplicate nearby locations
+  Future<void> optimizeStorage() async {
+    final db = await _open();
+    
+    // Remove locations that are very close to each other (within 10 meters)
+    // Keep only the most recent one
+    await db.execute('''
+      DELETE FROM $_table 
+      WHERE id NOT IN (
+        SELECT MAX(id) 
+        FROM $_table t1 
+        WHERE EXISTS (
+          SELECT 1 FROM $_table t2 
+          WHERE t2.id != t1.id 
+          AND ABS(t1.latitude - t2.latitude) < 0.0001 
+          AND ABS(t1.longitude - t2.longitude) < 0.0001
+          AND t1.timestamp_ms <= t2.timestamp_ms
+        )
+      )
+    ''');
+    
+    // Vacuum after optimization
+    await db.execute('VACUUM');
   }
 }
 

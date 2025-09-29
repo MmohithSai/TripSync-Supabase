@@ -1,10 +1,10 @@
 import 'dart:async';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+// Removed unused Supabase import
 
 import '../../../common/providers.dart';
 import '../data/local_location_queue.dart';
@@ -40,6 +40,7 @@ class LocationController extends Notifier<LocationState> {
   Position? _lastPersistedPosition;
   DateTime? _lastPersistedTime;
   final LocalLocationQueue _localQueue = LocalLocationQueue();
+  DateTime? _lastMovementTime;
 
   @override
   LocationState build() {
@@ -53,11 +54,10 @@ class LocationController extends Notifier<LocationState> {
   }
 
   Stream<Position> get positionStream {
-    final bool isMoving = false; // fallback default; adaptive handled in _start
     return Geolocator.getPositionStream(
-      locationSettings: LocationSettings(
+      locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.high,
-        distanceFilter: isMoving ? 5 : 25,
+        distanceFilter: 25,
       ),
     );
   }
@@ -67,7 +67,9 @@ class LocationController extends Notifier<LocationState> {
     if (state.permissionsGranted) {
       await _start();
     }
-    _connectivitySub = Connectivity().onConnectivityChanged.listen((result) async {
+    _connectivitySub = Connectivity().onConnectivityChanged.listen((
+      result,
+    ) async {
       if (result != ConnectivityResult.none) {
         await _syncLocalQueue();
       }
@@ -90,7 +92,9 @@ class LocationController extends Notifier<LocationState> {
     }
 
     state = state.copyWith(
-      permissionsGranted: permission == LocationPermission.always || permission == LocationPermission.whileInUse,
+      permissionsGranted:
+          permission == LocationPermission.always ||
+          permission == LocationPermission.whileInUse,
       serviceEnabled: serviceEnabled,
     );
   }
@@ -98,42 +102,44 @@ class LocationController extends Notifier<LocationState> {
   Future<void> _start() async {
     await _subscription?.cancel();
 
-    final LocationSettings baseSettings = const LocationSettings(
-      accuracy: LocationAccuracy.high,
-      distanceFilter: 25,
-    );
-
     // Optimized location settings for battery efficiency
     final Stream<Position> stream;
     if (defaultTargetPlatform == TargetPlatform.android) {
       stream = Geolocator.getPositionStream(
         locationSettings: AndroidSettings(
-          accuracy: LocationAccuracy.medium, // Reduced from high for battery savings
-          distanceFilter: 50, // Increased to reduce frequency
-          intervalDuration: const Duration(seconds: 10), // Increased interval
-          forceLocationManager: false, // Use FusedLocationProvider for better battery
+          accuracy: LocationAccuracy.low, // Further reduced for battery savings
+          distanceFilter: 100, // Increased to reduce frequency
+          intervalDuration: const Duration(seconds: 30), // Increased interval
+          forceLocationManager:
+              false, // Use FusedLocationProvider for better battery
           foregroundNotificationConfig: ForegroundNotificationConfig(
             notificationText: 'Tracking location efficiently',
             notificationTitle: 'TripSync',
             enableWakeLock: false, // Disable wake lock for battery savings
+            notificationIcon: AndroidResource(
+              name: 'ic_location',
+              defType: 'drawable',
+            ),
           ),
         ),
       );
     } else if (defaultTargetPlatform == TargetPlatform.iOS) {
       stream = Geolocator.getPositionStream(
         locationSettings: AppleSettings(
-          accuracy: LocationAccuracy.medium, // Reduced for battery savings
-          distanceFilter: 50, // Increased to reduce frequency
+          accuracy: LocationAccuracy.low, // Further reduced for battery savings
+          distanceFilter: 100, // Increased to reduce frequency
           showBackgroundLocationIndicator: true,
           allowBackgroundLocationUpdates: true,
-          pauseLocationUpdatesAutomatically: true, // Enable auto-pause for battery
+          pauseLocationUpdatesAutomatically:
+              true, // Enable auto-pause for battery
+          activityType: ActivityType.otherNavigation, // Optimize for navigation
         ),
       );
     } else {
       stream = Geolocator.getPositionStream(
         locationSettings: LocationSettings(
-          accuracy: LocationAccuracy.medium,
-          distanceFilter: 50,
+          accuracy: LocationAccuracy.low,
+          distanceFilter: 100,
         ),
       );
     }
@@ -141,6 +147,7 @@ class LocationController extends Notifier<LocationState> {
     _subscription = stream.listen(
       (position) {
         state = state.copyWith(currentPosition: position);
+        _updateMovementState(position);
         _conditionallyPersistPosition(position);
       },
       onError: (Object error, StackTrace stackTrace) async {
@@ -194,15 +201,40 @@ class LocationController extends Notifier<LocationState> {
         ? 999999
         : now.difference(_lastPersistedTime!).inSeconds;
 
-    final bool accuracyGood = (current.accuracy.isFinite && current.accuracy <= minAccuracyMeters);
+    final bool accuracyGood =
+        (current.accuracy.isFinite && current.accuracy <= minAccuracyMeters);
 
     // Save if moved enough with decent accuracy, or if a lot of time passed and moved some
     if (accuracyGood && distance >= minDistanceMeters) return true;
-    if (secondsSince >= minSecondsBetween && distance >= (minDistanceMeters / 2)) return true;
+    if (secondsSince >= minSecondsBetween &&
+        distance >= (minDistanceMeters / 2))
+      return true;
     return false;
   }
 
+  void _updateMovementState(Position position) {
+    final now = DateTime.now();
+    final speed = position.speed;
+
+    // Consider moving if speed > 1 m/s (3.6 km/h) or significant movement
+    final isCurrentlyMoving =
+        speed > 1.0 ||
+        (_lastPersistedPosition != null &&
+            Geolocator.distanceBetween(
+                  _lastPersistedPosition!.latitude,
+                  _lastPersistedPosition!.longitude,
+                  position.latitude,
+                  position.longitude,
+                ) >
+                20); // 20 meters movement
+
+    if (isCurrentlyMoving) {
+      _lastMovementTime = now;
+    }
+  }
+
   Future<void> _conditionallyPersistPosition(Position p) async {
+    _updateMovementState(p);
     if (!_hasMeaningfulMovement(p)) return;
     // enqueue locally first
     await _localQueue.enqueue(
@@ -222,63 +254,42 @@ class LocationController extends Notifier<LocationState> {
     });
   }
 
-  Future<void> _flushToCloud({
-    required double latitude,
-    required double longitude,
-    double? accuracy,
-    required int timestampMs,
-  }) async {
-    final user = ref.read(firebaseAuthProvider).currentUser;
-    if (user == null) return;
-    final fs = ref.read(firestoreProvider);
-    final doc = fs.collection('users').doc(user.uid).collection('locations').doc();
-    await doc.set({
-      'latitude': latitude,
-      'longitude': longitude,
-      'accuracy': accuracy,
-      'timestamp': FieldValue.serverTimestamp(),
-      'clientTimestampMs': timestampMs,
-    }, SetOptions(merge: false));
-    _lastPersistedPosition = Position(
-      latitude: latitude,
-      longitude: longitude,
-      timestamp: DateTime.fromMillisecondsSinceEpoch(timestampMs),
-      accuracy: accuracy ?? 0,
-      altitude: 0,
-      altitudeAccuracy: 0,
-      heading: 0,
-      headingAccuracy: 0,
-      speed: 0,
-      speedAccuracy: 0,
-    );
-    _lastPersistedTime = DateTime.now();
-  }
-
   Future<void> _syncLocalQueue() async {
     // Clean up old entries periodically to save storage
     await _localQueue.cleanupOldEntries();
+
+    // Optimize storage every 10th sync to remove duplicates
+    final stats = await _localQueue.getStorageStats();
+    if (stats['rowCount']! > 1000) {
+      await _localQueue.optimizeStorage();
+    }
+
     final result = await Connectivity().checkConnectivity();
     if (result == ConnectivityResult.none) return;
     final pending = await _localQueue.peekAll();
     if (pending.isEmpty) return;
-    final user = ref.read(firebaseAuthProvider).currentUser;
+    final user = ref.read(currentUserProvider);
     if (user == null) return;
-    final fs = ref.read(firestoreProvider);
-    final batch = fs.batch();
+    final supabase = ref.read(supabaseProvider);
+
     final List<int> flushedIds = [];
-    for (final row in pending.take(300)) { // cap batch size
-      final doc = fs.collection('users').doc(user.uid).collection('locations').doc();
-      batch.set(doc, {
+    final List<Map<String, dynamic>> locationsToInsert = [];
+
+    for (final row in pending.take(200)) {
+      // Reduced batch size for better performance
+      locationsToInsert.add({
+        'user_id': user.id,
         'latitude': (row['latitude'] as num).toDouble(),
         'longitude': (row['longitude'] as num).toDouble(),
         'accuracy': (row['accuracy'] as num?)?.toDouble(),
-        'timestamp': FieldValue.serverTimestamp(),
-        'clientTimestampMs': row['timestamp_ms'] as int,
+        'client_timestamp_ms': row['timestamp_ms'] as int,
+        'created_at': DateTime.now().toIso8601String(),
       });
       flushedIds.add(row['id'] as int);
     }
+
     try {
-      await batch.commit();
+      await supabase.from('locations').insert(locationsToInsert);
       await _localQueue.deleteByIds(flushedIds);
     } catch (_) {
       // if batch fails, fallback to incremental next time
@@ -290,9 +301,7 @@ class LocationController extends Notifier<LocationState> {
   }
 }
 
-final locationControllerProvider = NotifierProvider<LocationController, LocationState>(() {
-  return LocationController();
-});
-
-
-
+final locationControllerProvider =
+    NotifierProvider<LocationController, LocationState>(() {
+      return LocationController();
+    });

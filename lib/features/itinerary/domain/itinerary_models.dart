@@ -1,4 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+// Removed Firebase import - now using Supabase
 
 class PlaceOfInterest {
   final String id;
@@ -107,33 +107,35 @@ class TripItinerary {
 
   Map<String, dynamic> toMap() => {
     'id': id,
-    'tripId': tripId,
-    'userId': userId,
+    'trip_id': tripId,
+    'user_id': userId,
     'title': title,
     'description': description,
-    'createdAt': Timestamp.fromDate(createdAt),
-    'updatedAt': updatedAt != null ? Timestamp.fromDate(updatedAt!) : null,
+    'created_at': createdAt.toIso8601String(),
+    'updated_at': updatedAt?.toIso8601String(),
     'items': items.map((item) => item.toMap()).toList(),
-    'isCompleted': isCompleted,
-    'totalDistance': totalDistance,
-    'estimatedDuration': estimatedDuration,
+    'is_completed': isCompleted,
+    'total_distance': totalDistance,
+    'estimated_duration': estimatedDuration,
   };
 
   static TripItinerary fromMap(Map<String, dynamic> map) {
     return TripItinerary(
       id: map['id'] as String,
-      tripId: map['tripId'] as String,
-      userId: map['userId'] as String,
+      tripId: map['trip_id'] as String,
+      userId: map['user_id'] as String,
       title: map['title'] as String,
       description: map['description'] as String,
-      createdAt: (map['createdAt'] as Timestamp).toDate(),
-      updatedAt: map['updatedAt'] != null ? (map['updatedAt'] as Timestamp).toDate() : null,
+      createdAt: DateTime.parse(map['created_at']),
+      updatedAt: map['updated_at'] != null
+          ? DateTime.parse(map['updated_at'])
+          : null,
       items: (map['items'] as List<dynamic>)
           .map((item) => ItineraryItem.fromMap(item as Map<String, dynamic>))
           .toList(),
-      isCompleted: map['isCompleted'] as bool,
-      totalDistance: (map['totalDistance'] as num).toDouble(),
-      estimatedDuration: map['estimatedDuration'] as int,
+      isCompleted: map['is_completed'] as bool,
+      totalDistance: (map['total_distance'] as num).toDouble(),
+      estimatedDuration: map['estimated_duration'] as int,
     );
   }
 }
@@ -181,7 +183,7 @@ class ItineraryItem {
     'category': category,
     'order': order,
     'estimatedDuration': estimatedDuration,
-    'scheduledTime': scheduledTime != null ? Timestamp.fromDate(scheduledTime!) : null,
+    'scheduledTime': scheduledTime?.toIso8601String(),
     'isCompleted': isCompleted,
     'notes': notes,
     'rating': rating,
@@ -199,7 +201,9 @@ class ItineraryItem {
       category: map['category'] as String,
       order: map['order'] as int,
       estimatedDuration: map['estimatedDuration'] as int,
-      scheduledTime: map['scheduledTime'] != null ? (map['scheduledTime'] as Timestamp).toDate() : null,
+      scheduledTime: map['scheduledTime'] != null
+          ? DateTime.parse(map['scheduledTime'])
+          : null,
       isCompleted: map['isCompleted'] as bool,
       notes: map['notes'] as String?,
       rating: (map['rating'] as num).toDouble(),
@@ -273,5 +277,3 @@ class TripSuggestion {
     );
   }
 }
-
-
