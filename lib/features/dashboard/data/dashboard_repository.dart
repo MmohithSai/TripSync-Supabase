@@ -64,7 +64,8 @@ class DashboardRepository {
       final pointsResponse = await _supabase
           .from('trip_points')
           .select()
-          .eq('trip_id', tripData['id']);
+          .eq('trip_id', tripData['id'])
+          .eq('user_id', uid);
 
       final points = pointsResponse.map((pointData) {
         return TripPoint.fromMap(pointData);

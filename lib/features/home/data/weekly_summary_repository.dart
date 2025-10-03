@@ -291,8 +291,9 @@ final weeklySummaryRepositoryProvider = Provider<WeeklySummaryRepository>((
 
 // Provider for weekly summary
 final weeklySummaryProvider = FutureProvider<WeeklySummary>((ref) async {
-  // TODO: Get current user ID from auth provider
-  final userId = 'current-user-id'; // This should come from auth
+  final user = ref.read(currentUserProvider);
+  if (user == null) throw Exception('User not authenticated');
+  
   final repository = ref.watch(weeklySummaryRepositoryProvider);
-  return repository.getWeeklySummary(userId);
+  return repository.getWeeklySummary(user.id);
 });

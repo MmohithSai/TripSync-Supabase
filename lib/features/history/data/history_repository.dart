@@ -1,5 +1,4 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-// Removed unused Supabase import
 
 import '../../../common/providers.dart';
 import '../../trips/domain/trip_models.dart';
@@ -32,11 +31,11 @@ class HistoryRepository {
       query = query.lte('timestamp', endDate.toIso8601String());
     }
     if (mode != null) {
-      query = query.eq('mode', mode.toString());
+      query = query.eq('mode', mode.name);
     }
 
     return query.stream(primaryKey: ['id']).map((data) {
-      return data.map((trip) => TripSummary.fromMap(trip)).toList();
+      return data.map((trip) => TripSummary.fromSupabase(trip)).toList();
     });
   }
 
@@ -80,11 +79,15 @@ class HistoryRepository {
     final supabase = ref.read(supabaseProvider);
 
     // Delete trip points first
-    await supabase
-        .from('trip_points')
-        .delete()
-        .eq('trip_id', tripId)
-        .eq('user_id', uid);
+    try {
+      await supabase
+          .from('trip_points')
+          .delete()
+          .eq('trip_id', tripId)
+          .eq('user_id', uid);
+    } catch (e) {
+      // Trip points might not exist, continue with trip deletion
+    }
 
     // Delete trip summary
     await supabase.from('trips').delete().eq('id', tripId).eq('user_id', uid);
@@ -129,11 +132,15 @@ class HistoryRepository {
     final supabase = ref.read(supabaseProvider);
 
     // Delete trip points first
-    await supabase
-        .from('trip_points')
-        .delete()
-        .inFilter('trip_id', tripIds)
-        .eq('user_id', uid);
+    try {
+      await supabase
+          .from('trip_points')
+          .delete()
+          .inFilter('trip_id', tripIds)
+          .eq('user_id', uid);
+    } catch (e) {
+      // Trip points might not exist, continue with trip deletion
+    }
 
     // Delete trip summaries
     await supabase

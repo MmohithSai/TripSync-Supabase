@@ -4,8 +4,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+<<<<<<< HEAD
 import 'package:permission_handler/permission_handler.dart';
 // Removed unused Supabase import
+=======
+>>>>>>> f9701a696c21c90c70eb11d41fb69ad1780210b8
 
 import '../../../common/providers.dart';
 import '../data/local_location_queue.dart';

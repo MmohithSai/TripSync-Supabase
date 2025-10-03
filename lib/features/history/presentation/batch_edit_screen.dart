@@ -367,7 +367,7 @@ class _BatchEditScreenState extends ConsumerState<BatchEditScreen> {
         // Apply changes to all selected trips
         final user = ref.read(currentUserProvider);
         if (user != null) {
-          await repository.batchUpdateTrips(
+          await ref.read(historyRepositoryProvider).batchUpdateTrips(
             uid: user.id,
             tripIds: widget.selectedTripIds,
             mode: _selectedMode != null ? TripMode.values.firstWhere((m) => m.toString() == _selectedMode) : null,

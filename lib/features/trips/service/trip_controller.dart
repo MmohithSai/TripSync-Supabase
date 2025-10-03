@@ -118,6 +118,12 @@ class TripController extends Notifier<TripState> {
     double? destinationLongitude,
     String? destinationPlaceId,
   }) async {
+<<<<<<< HEAD
+=======
+    final user = ref.read(currentUserProvider);
+    if (user == null) throw Exception('User not authenticated');
+    
+>>>>>>> f9701a696c21c90c70eb11d41fb69ad1780210b8
     if (state.activeTripId != null) return;
 
     // 🚀 CRITICAL: Start trip in backend first
@@ -140,9 +146,24 @@ class TripController extends Notifier<TripState> {
         .read(locationControllerProvider)
         .currentPosition;
 
+<<<<<<< HEAD
     // Generate a temporary trip ID for tracking
     final tripId = DateTime.now().millisecondsSinceEpoch.toString();
 
+=======
+    final repo = ref.read(tripRepositoryProvider);
+    final id = await repo.startTrip(
+      uid: user.id,
+      mode: mode,
+      purpose: purpose,
+      originRegion: originRegion,
+      destinationName: destinationName,
+      destinationAddress: destinationAddress,
+      destinationLatitude: destinationLatitude,
+      destinationLongitude: destinationLongitude,
+      destinationPlaceId: destinationPlaceId,
+    );
+>>>>>>> f9701a696c21c90c70eb11d41fb69ad1780210b8
     state = state.copyWith(
       activeTripId: tripId,
       manuallyActive: true,
@@ -155,6 +176,7 @@ class TripController extends Notifier<TripState> {
     );
   }
 
+<<<<<<< HEAD
   Future<TripData?> stopManual() async {
     if (state.activeTripId == null) return null;
 
@@ -194,6 +216,12 @@ class TripController extends Notifier<TripState> {
       print('❌ Backend trip stop error: $e');
       // Continue with local trip stop as fallback
     }
+=======
+  Future<void> stopManual() async {
+    if (state.activeTripId == null) return;
+    final user = ref.read(currentUserProvider);
+    if (user == null) throw Exception('User not authenticated');
+>>>>>>> f9701a696c21c90c70eb11d41fb69ad1780210b8
 
     // Get current location to determine destination region
     final currentPosition = ref
@@ -206,6 +234,7 @@ class TripController extends Notifier<TripState> {
           )
         : null;
 
+<<<<<<< HEAD
     // Use stored trip data (state was already reset above)
     final endPos = currentPosition;
 
@@ -216,6 +245,15 @@ class TripController extends Notifier<TripState> {
       endLocation: endPos,
       distanceMeters: distanceMeters,
       allPoints: allPoints,
+=======
+    final repo = ref.read(tripRepositoryProvider);
+    await _flushBuffer();
+    await repo.updateSummary(
+      uid: user.id,
+      tripId: state.activeTripId!,
+      endedAt: DateTime.now(),
+      distanceMeters: state.distanceMeters,
+>>>>>>> f9701a696c21c90c70eb11d41fb69ad1780210b8
       destinationRegion: destinationRegion,
     );
   }
@@ -252,10 +290,15 @@ class TripController extends Notifier<TripState> {
           },
           distanceKm: distanceKm,
           durationMin: durationMin,
+<<<<<<< HEAD
           mode: mode ?? 'unknown',
           purpose: purpose ?? 'unknown',
           companions: companions ?? {'adults': 0, 'children': 0, 'seniors': 0},
           notes: notes,
+=======
+          mode: mode.name,
+          purpose: purpose.name,
+>>>>>>> f9701a696c21c90c70eb11d41fb69ad1780210b8
           originRegion: null,
           destinationRegion: destinationRegion,
           tripPoints: allPoints, // Include complete route data
@@ -426,9 +469,26 @@ class TripController extends Notifier<TripState> {
   }
 
   Future<void> _flushPoints(List<TripPoint> points) async {
+<<<<<<< HEAD
     // During an active trip we only buffer in memory; we save all points on stop.
     // This avoids writing points to a non-existent trip ID in the backend.
     return;
+=======
+    if (state.activeTripId == null || points.isEmpty) return;
+    final user = ref.read(currentUserProvider);
+    if (user == null) return;
+    
+    final repo = ref.read(tripRepositoryProvider);
+    await repo.appendPoints(
+      uid: user.id,
+      tripId: state.activeTripId!,
+      points: List.of(points),
+    );
+  }
+
+  Future<void> _flushBuffer() async {
+    await _flushPoints(state.bufferedPoints);
+>>>>>>> f9701a696c21c90c70eb11d41fb69ad1780210b8
   }
 }
 

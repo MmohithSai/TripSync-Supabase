@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../common/providers.dart';
 import '../data/pending_trip_queue.dart';
-import '../data/supabase_trip_repository.dart';
+import '../data/trip_repository.dart';
 
 class TripSyncService {
   final Ref ref;
@@ -15,7 +15,7 @@ class TripSyncService {
   Future<void> syncPending() async {
     final items = await _queue.peekAll();
     if (items.isEmpty) return;
-    final repo = ref.read(supabaseTripRepositoryProvider);
+    final repo = ref.read(tripRepositoryProvider);
     final user = ref.read(currentUserProvider);
     if (user == null) return;
 
@@ -24,7 +24,7 @@ class TripSyncService {
       try {
         final payload =
             jsonDecode(row['payload'] as String) as Map<String, dynamic>;
-        await repo.saveTrip(
+        await repo.saveTripToSupabase(
           userId: user.id,
           startLocation: Map<String, double>.from(
             payload['start_location'] as Map,
