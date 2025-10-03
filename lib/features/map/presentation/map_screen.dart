@@ -9,7 +9,6 @@ import '../data/places_repository.dart';
 import '../../../common/providers.dart';
 import '../../trips/service/trip_controller.dart';
 import '../../trips/domain/trip_models.dart';
-import 'destination_input_dialog.dart';
 
 class MapScreen extends ConsumerStatefulWidget {
   const MapScreen({super.key});
@@ -265,6 +264,9 @@ class _MapScreenState extends ConsumerState<MapScreen>
                       tripState.activeTripId == null ? 'Start' : 'Stop',
                     ),
                     onPressed: () async {
+                      print(
+                        '🔘 Button pressed - current activeTripId: ${tripState.activeTripId}',
+                      );
                       final ctrl = ref.read(tripControllerProvider.notifier);
                       final loc = ref.read(locationControllerProvider);
                       // Basic guardrails and UX feedback
@@ -276,22 +278,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
                       if (!mounted) return;
                       try {
                         if (tripState.activeTripId == null) {
-                          // First, get destination input
-                          final destinationResult =
-                              await showDialog<Map<String, dynamic>>(
-                                context: context,
-                                builder: (context) =>
-                                    const DestinationInputDialog(),
-                              );
-
-                          if (destinationResult == null) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Trip start cancelled'),
-                              ),
-                            );
-                            return;
-                          }
+                          // Skip destination dialog - will be auto-detected
 
                           // Then prompt for other manual details
                           final result =
@@ -304,8 +291,6 @@ class _MapScreenState extends ConsumerState<MapScreen>
                                   int adults,
                                   int children,
                                   int seniors,
-                                  String? tripNumber,
-                                  String? chainId,
                                 })
                               >(
                                 context: context,
@@ -315,10 +300,6 @@ class _MapScreenState extends ConsumerState<MapScreen>
                                   TripMode? selMode;
                                   TripPurpose? selPurpose;
                                   final destController =
-                                      TextEditingController();
-                                  final tripNumberController =
-                                      TextEditingController();
-                                  final chainIdController =
                                       TextEditingController();
                                   final originController =
                                       TextEditingController();
@@ -417,23 +398,6 @@ class _MapScreenState extends ConsumerState<MapScreen>
                                                     'Origin region (optional)',
                                                 hintText:
                                                     'e.g. Home area, Sector 12',
-                                              ),
-                                            ),
-                                            const SizedBox(height: 8),
-                                            TextField(
-                                              controller: tripNumberController,
-                                              decoration: const InputDecoration(
-                                                labelText:
-                                                    'Trip number (optional)',
-                                              ),
-                                            ),
-                                            const SizedBox(height: 8),
-                                            TextField(
-                                              controller: chainIdController,
-                                              decoration: const InputDecoration(
-                                                labelText:
-                                                    'Chain ID (optional)',
-                                                hintText: 'Link multiple trips',
                                               ),
                                             ),
                                             const SizedBox(height: 12),
@@ -555,8 +519,6 @@ class _MapScreenState extends ConsumerState<MapScreen>
                                                           int adults,
                                                           int children,
                                                           int seniors,
-                                                          String? tripNumber,
-                                                          String? chainId,
                                                         })
                                                       >(context, (
                                                         mode: selMode,
@@ -581,24 +543,6 @@ class _MapScreenState extends ConsumerState<MapScreen>
                                                         adults: adults,
                                                         children: children,
                                                         seniors: seniors,
-                                                        tripNumber:
-                                                            tripNumberController
-                                                                .text
-                                                                .trim()
-                                                                .isEmpty
-                                                            ? null
-                                                            : tripNumberController
-                                                                  .text
-                                                                  .trim(),
-                                                        chainId:
-                                                            chainIdController
-                                                                .text
-                                                                .trim()
-                                                                .isEmpty
-                                                            ? null
-                                                            : chainIdController
-                                                                  .text
-                                                                  .trim(),
                                                       )),
                                                   child: const Text('Start'),
                                                 ),
@@ -622,23 +566,45 @@ class _MapScreenState extends ConsumerState<MapScreen>
                           await ctrl.startManual(
                             mode: result?.mode ?? TripMode.unknown,
                             purpose: result?.purpose ?? TripPurpose.unknown,
-                            destinationName: destinationResult['name'],
-                            destinationAddress: destinationResult['address'],
-                            destinationLatitude: destinationResult['latitude'],
-                            destinationLongitude:
-                                destinationResult['longitude'],
-                            destinationPlaceId: destinationResult['placeId'],
+                            // Destination will be auto-detected from GPS
                           );
                           if (!mounted) return;
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text('Trip started')),
                           );
                         } else {
-                          await ctrl.stopManual();
-                          if (!mounted) return;
+                          // Add loading indicator and timeout for stop
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Trip stopped')),
+                            const SnackBar(
+                              content: Text('Stopping trip...'),
+                              duration: Duration(seconds: 2),
+                            ),
                           );
+
+                          try {
+                            await ctrl.stopManual().timeout(
+                              const Duration(seconds: 10),
+                              onTimeout: () {
+                                print(
+                                  '⚠️ Stop trip timeout - forcing local stop',
+                                );
+                                return null;
+                              },
+                            );
+                            if (!mounted) return;
+                            print(
+                              '🔘 After stop - activeTripId: ${ref.read(tripControllerProvider).activeTripId}',
+                            );
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Trip stopped')),
+                            );
+                          } catch (e) {
+                            print('❌ Stop trip error: $e');
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Trip stopped')),
+                            );
+                          }
                         }
                       } catch (e) {
                         if (!mounted) return;

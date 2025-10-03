@@ -24,18 +24,18 @@ class TripDetectionConfig {
   factory TripDetectionConfig.fromMap(Map<String, dynamic> map) {
     return TripDetectionConfig(
       autoStartSpeedThreshold:
-          (map['autoStartSpeedThreshold'] as num?)?.toDouble() ?? 1.2,
+          (map['autoStartSpeedThreshold'] as num?)?.toDouble() ?? 0.8,
       autoStartTimeThreshold:
-          (map['autoStartTimeThreshold'] as num?)?.toInt() ?? 120,
+          (map['autoStartTimeThreshold'] as num?)?.toInt() ?? 60,
       stopRadiusThreshold:
-          (map['stopRadiusThreshold'] as num?)?.toDouble() ?? 50.0,
-      stopTimeThreshold: (map['stopTimeThreshold'] as num?)?.toInt() ?? 180,
+          (map['stopRadiusThreshold'] as num?)?.toDouble() ?? 30.0,
+      stopTimeThreshold: (map['stopTimeThreshold'] as num?)?.toInt() ?? 120,
       minDistanceThreshold:
-          (map['minDistanceThreshold'] as num?)?.toDouble() ?? 150.0,
+          (map['minDistanceThreshold'] as num?)?.toDouble() ?? 50.0,
       minDurationThreshold:
-          (map['minDurationThreshold'] as num?)?.toInt() ?? 300,
-      distanceFilter: (map['distanceFilter'] as num?)?.toDouble() ?? 25.0,
-      intervalDuration: (map['intervalDuration'] as num?)?.toInt() ?? 5,
+          (map['minDurationThreshold'] as num?)?.toInt() ?? 60,
+      distanceFilter: (map['distanceFilter'] as num?)?.toDouble() ?? 5.0,
+      intervalDuration: (map['intervalDuration'] as num?)?.toInt() ?? 3,
     );
   }
 
@@ -55,14 +55,14 @@ class TripDetectionConfig {
 
 class RemoteConfigService {
   static const TripDetectionConfig _defaultConfig = TripDetectionConfig(
-    autoStartSpeedThreshold: 1.2,
-    autoStartTimeThreshold: 120,
-    stopRadiusThreshold: 50.0,
-    stopTimeThreshold: 180,
-    minDistanceThreshold: 150.0,
-    minDurationThreshold: 300,
-    distanceFilter: 25.0,
-    intervalDuration: 5,
+    autoStartSpeedThreshold: 0.8, // Reduced for more sensitive trip detection
+    autoStartTimeThreshold: 60, // Reduced for faster trip start
+    stopRadiusThreshold: 30.0, // Reduced for more sensitive stop detection
+    stopTimeThreshold: 120, // Reduced for faster trip end detection
+    minDistanceThreshold: 50.0, // Reduced to capture shorter trips
+    minDurationThreshold: 60, // Reduced to capture shorter trips
+    distanceFilter: 5.0, // Reduced for more frequent location updates
+    intervalDuration: 3, // Reduced for more frequent updates
   );
 
   static Future<void> initialize() async {

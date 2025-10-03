@@ -258,6 +258,31 @@ class TripSummary {
       customData: map['customData'] as Map<String, dynamic>?,
     );
   }
+
+  /// Get route points for this trip (requires external service call)
+  /// This method is a placeholder - actual implementation would call the trip service
+  Future<List<TripPoint>> getRoutePoints() async {
+    // This would typically call a service to get the route points
+    // For now, return an empty list as a placeholder
+    return [];
+  }
+
+  /// Get route summary information
+  Map<String, dynamic> getRouteSummary() {
+    return {
+      'hasRouteData': totalPoints != null && totalPoints! > 0,
+      'totalPoints': totalPoints ?? 0,
+      'averageSpeed': averageSpeed,
+      'maxSpeed': maxSpeed,
+      'minSpeed': minSpeed,
+      'routeName': routeName,
+      'routeType': routeType,
+      'stopsCount': stopsCount,
+      'totalElevationGain': totalElevationGain,
+      'totalElevationLoss': totalElevationLoss,
+      'averageAccuracy': averageAccuracy,
+    };
+  }
 }
 
 class TripPoint {

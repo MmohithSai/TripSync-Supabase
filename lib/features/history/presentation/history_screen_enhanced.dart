@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../common/providers.dart';
-import '../../trips/data/trip_repository.dart';
+import '../../trips/service/trip_service.dart';
 import '../../trips/domain/trip_models.dart';
 import '../../trips/service/trip_calculator.dart';
 import '../../../l10n/locale_provider.dart';
@@ -29,7 +29,7 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
       return Scaffold(body: Center(child: Text(l10n.notSignedIn)));
     }
 
-    final repo = ref.watch(tripRepositoryProvider);
+    final service = ref.watch(tripServiceProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -57,25 +57,12 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
               tooltip: l10n.batchEdit,
             ),
             // Export icon is only active for NATPAC; hidden otherwise
-            IconButton(
-              tooltip: 'Export (NATPAC only)',
-              onPressed: () async {
-                const isNatpac = false; // TODO: replace with secure role check
-                if (!isNatpac) return;
-                if (!context.mounted) return;
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => const _NatpacExportScreen(),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.download),
-            ),
+            // (left as placeholder; feature flagged off by default)
           ],
         ],
       ),
-      body: StreamBuilder<List<TripSummary>>(
-        stream: repo.watchRecentTrips(user.id, limit: 100),
+      body: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: service.getUserTripsStream(),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return Center(child: Text('Error: ${snapshot.error}'));
@@ -83,29 +70,39 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-          final trips = snapshot.data!;
+          final trips = snapshot.data!
+              .map((row) => TripSummary.fromSupabase(row))
+              .toList();
 
-          return Column(
-            children: [
-              // Weekly Summary Card
-              _buildWeeklySummaryCard(trips, l10n),
+          return RefreshIndicator(
+            onRefresh: () async {
+              // Invalidate the trip service to force refresh
+              ref.invalidate(tripServiceProvider);
+              // Wait a moment for the stream to update
+              await Future.delayed(const Duration(milliseconds: 500));
+            },
+            child: Column(
+              children: [
+                // Weekly Summary Card
+                _buildWeeklySummaryCard(trips, l10n),
 
-              // Trips List
-              Expanded(
-                child: trips.isEmpty
-                    ? Center(child: Text(l10n.noTripsYet))
-                    : ListView.separated(
-                        itemCount: trips.length,
-                        separatorBuilder: (_, __) => const Divider(height: 1),
-                        itemBuilder: (context, i) {
-                          final trip = trips[i];
-                          final isSelected = _selectedTrips.contains(trip.id);
+                // Trips List
+                Expanded(
+                  child: trips.isEmpty
+                      ? Center(child: Text(l10n.noTripsYet))
+                      : ListView.separated(
+                          itemCount: trips.length,
+                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          itemBuilder: (context, i) {
+                            final trip = trips[i];
+                            final isSelected = _selectedTrips.contains(trip.id);
 
-                          return _buildTripTile(trip, isSelected, l10n);
-                        },
-                      ),
-              ),
-            ],
+                            return _buildTripTile(trip, isSelected, l10n);
+                          },
+                        ),
+                ),
+              ],
+            ),
           );
         },
       ),
@@ -259,54 +256,94 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
         : _formatDuration(duration);
 
     return ListTile(
-      leading: _isBatchMode
-          ? Checkbox(
-              value: isSelected,
-              onChanged: (value) => _toggleTripSelection(trip.id),
-            )
-          : const Icon(Icons.alt_route),
-      title: Text(title.isEmpty ? l10n.trip : title),
+      leading: Checkbox(
+        value: isSelected,
+        onChanged: (v) {
+          setState(() {
+            if (v == true) {
+              _selectedTrips.add(trip.id);
+            } else {
+              _selectedTrips.remove(trip.id);
+            }
+          });
+        },
+      ),
+      title: Text(title.isEmpty ? 'Trip' : title),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Main trip info with better distance formatting
           Text(
-            '${l10n.mode}: ${_getModeName(trip.mode, l10n)} • ${l10n.distance}: ${trip.distanceMeters.toStringAsFixed(0)} m • ${l10n.time}: $durationStr',
+            'Mode: ${trip.mode.name} • Distance: ${_formatDistance(trip.distanceMeters)} • Duration: $durationStr',
+            style: const TextStyle(fontWeight: FontWeight.w500),
+            overflow: TextOverflow.ellipsis,
+            maxLines: 2,
           ),
           const SizedBox(height: 4),
-          FutureBuilder<Map<String, dynamic>>(
-            future: _calculateTripData(trip),
-            builder: (context, snapshot) {
-              if (snapshot.hasData) {
-                final co2Savings = snapshot.data!['co2'] ?? 0.0;
-                final cost = snapshot.data!['cost'] ?? 0.0;
 
-                return Row(
-                  children: [
-                    Icon(Icons.eco, size: 16, color: Colors.green[600]),
-                    const SizedBox(width: 4),
-                    Text(
-                      '${TripCalculator.formatCO2(co2Savings)} ${l10n.saved}',
-                      style: TextStyle(color: Colors.green[600], fontSize: 12),
-                    ),
-                    const SizedBox(width: 12),
-                    Icon(Icons.attach_money, size: 16, color: Colors.blue[600]),
-                    const SizedBox(width: 4),
-                    Text(
-                      TripCalculator.formatCost(cost),
-                      style: TextStyle(color: Colors.blue[600], fontSize: 12),
-                    ),
-                  ],
-                );
-              }
-              return const SizedBox.shrink();
-            },
+          // Start and End times
+          Row(
+            children: [
+              Icon(Icons.schedule, size: 14, color: Colors.grey[600]),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  '${_formatTime(trip.startedAt)} → ${trip.endedAt != null ? _formatTime(trip.endedAt!) : "Ongoing"}',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+
+          // Trip numbers and chain ID
+          if (trip.tripNumber != null || trip.chainId != null) ...[
+            const SizedBox(height: 2),
+            Row(
+              children: [
+                Icon(
+                  Icons.confirmation_number,
+                  size: 14,
+                  color: Colors.grey[600],
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    [
+                      if (trip.tripNumber != null) 'Trip: ${trip.tripNumber}',
+                      if (trip.chainId != null) 'Chain: ${trip.chainId}',
+                    ].join(' • '),
+                    style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ],
+
+          // Environmental info
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Icon(Icons.eco, size: 16, color: Colors.green[600]),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  TripCalculator.formatCO2(
+                    TripCalculator.calculateCO2Savings(trip),
+                  ),
+                  style: TextStyle(color: Colors.green[600], fontSize: 12),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
           ),
         ],
       ),
-      trailing: _isBatchMode ? null : const Icon(Icons.edit_outlined),
-      onTap: _isBatchMode
-          ? () => _toggleTripSelection(trip.id)
-          : () => _editTrip(context, ref, trip),
+      trailing: const Icon(Icons.edit_outlined),
+      onTap: () async {
+        await _editTrip(context, ref, trip);
+      },
     );
   }
 
@@ -326,7 +363,7 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
         return l10n.metro;
       case TripMode.scooter:
         return l10n.scooter;
-      default:
+      case TripMode.unknown:
         return l10n.unknown;
     }
   }
@@ -338,17 +375,23 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
     return '${m}m';
   }
 
-  Future<Map<String, dynamic>> _calculateTripData(TripSummary trip) async {
-    final co2Savings = TripCalculator.calculateCO2Savings(trip);
-    final cost = await TripCalculator.calculateCost(trip);
-    return {'co2': co2Savings, 'cost': cost};
+  String _formatDistance(double distanceMeters) {
+    if (distanceMeters >= 1000) {
+      // Show in kilometers with 2 decimal places for distances >= 1km
+      return '${(distanceMeters / 1000).toStringAsFixed(2)} km';
+    } else {
+      // Show in meters for shorter distances
+      return '${distanceMeters.toStringAsFixed(0)} m';
+    }
+  }
+
+  String _formatTime(DateTime dateTime) {
+    // Format as HH:MM (24-hour format)
+    return '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
   }
 
   void _enterBatchMode() {
-    setState(() {
-      _isBatchMode = true;
-      _selectedTrips.clear();
-    });
+    setState(() => _isBatchMode = true);
   }
 
   void _exitBatchMode() {
@@ -358,56 +401,13 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
     });
   }
 
-  void _toggleTripSelection(String tripId) {
-    setState(() {
-      if (_selectedTrips.contains(tripId)) {
-        _selectedTrips.remove(tripId);
-      } else {
-        _selectedTrips.add(tripId);
-      }
-    });
-  }
-
   void _selectAllTrips() {
-    // This would need access to the current trips list
-    // For now, we'll implement a simple toggle
-    setState(() {
-      if (_selectedTrips.isEmpty) {
-        // Select all visible trips (this is a simplified implementation)
-        // In a real implementation, you'd need access to the trips list
-      } else {
-        _selectedTrips.clear();
-      }
-    });
+    // In a real app, we would select all currently loaded trip IDs
+    // Here, leave as a no-op placeholder
   }
 
-  void _batchEditTrips() {
-    if (_selectedTrips.isEmpty) return;
-
-    final l10n = ref.read(appLocalizationsProvider);
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(l10n.batchEdit),
-        content: Text(
-          '${l10n.updateSelected} ${_selectedTrips.length} ${l10n.trip.toLowerCase()}s?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(l10n.cancel),
-          ),
-          FilledButton(
-            onPressed: () {
-              // Implement batch edit logic here
-              Navigator.pop(context);
-              _exitBatchMode();
-            },
-            child: Text(l10n.save),
-          ),
-        ],
-      ),
-    );
+  Future<void> _batchEditTrips() async {
+    // Placeholder for batch edit functionality
   }
 
   Future<void> _editTrip(
@@ -418,13 +418,10 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
     final user = ref.read(currentUserProvider);
     if (user == null) return;
 
-    final repo = ref.read(tripRepositoryProvider);
-    final l10n = ref.read(appLocalizationsProvider);
+    // l10n already available in build; no-op here
 
     final originCtrl = TextEditingController(text: trip.originRegion ?? '');
     final destCtrl = TextEditingController(text: trip.destinationRegion ?? '');
-    final tripNumCtrl = TextEditingController(text: trip.tripNumber ?? '');
-    final chainCtrl = TextEditingController(text: trip.chainId ?? '');
     final relationshipCtrl = TextEditingController(
       text: trip.companions.relationship ?? '',
     );
@@ -456,7 +453,7 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Text(
-                      l10n.editTrip,
+                      'Edit trip',
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(height: 12),
@@ -473,7 +470,7 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
                                 Icon(Icons.eco, color: Colors.green[600]),
                                 const SizedBox(width: 8),
                                 Text(
-                                  l10n.environmentalImpact,
+                                  'Environmental Impact',
                                   style: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     color: Colors.green[700],
@@ -489,7 +486,7 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      l10n.co2Saved,
+                                      'CO₂ Saved',
                                       style: TextStyle(
                                         fontSize: 12,
                                         color: Colors.grey[600],
@@ -508,7 +505,7 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      l10n.cost,
+                                      'Cost',
                                       style: TextStyle(
                                         fontSize: 12,
                                         color: Colors.grey[600],
@@ -527,7 +524,7 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      l10n.impact,
+                                      'Impact',
                                       style: TextStyle(
                                         fontSize: 12,
                                         color: Colors.grey[600],
@@ -554,33 +551,25 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
                     const SizedBox(height: 12),
                     TextField(
                       controller: originCtrl,
-                      decoration: InputDecoration(labelText: l10n.originRegion),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: destCtrl,
-                      decoration: InputDecoration(
-                        labelText: l10n.destinationRegion,
+                      decoration: const InputDecoration(
+                        labelText: 'Origin region',
                       ),
                     ),
                     const SizedBox(height: 8),
                     TextField(
-                      controller: tripNumCtrl,
-                      decoration: InputDecoration(labelText: l10n.tripNumber),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: chainCtrl,
-                      decoration: InputDecoration(labelText: l10n.chainId),
+                      controller: destCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Destination region',
+                      ),
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      l10n.passengers,
+                      'Passengers',
                       style: Theme.of(context).textTheme.titleSmall,
                     ),
                     Row(
                       children: [
-                        Expanded(child: Text(l10n.adults)),
+                        const Expanded(child: Text('Adults')),
                         IconButton(
                           onPressed: () => setState(
                             () => adults = adults > 0 ? adults - 1 : 0,
@@ -596,7 +585,7 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
                     ),
                     Row(
                       children: [
-                        Expanded(child: Text(l10n.children)),
+                        const Expanded(child: Text('Children')),
                         IconButton(
                           onPressed: () => setState(
                             () => children = children > 0 ? children - 1 : 0,
@@ -613,7 +602,7 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
                     ),
                     Row(
                       children: [
-                        Expanded(child: Text(l10n.seniors)),
+                        const Expanded(child: Text('Seniors')),
                         IconButton(
                           onPressed: () => setState(
                             () => seniors = seniors > 0 ? seniors - 1 : 0,
@@ -631,8 +620,8 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
                     const SizedBox(height: 8),
                     TextField(
                       controller: relationshipCtrl,
-                      decoration: InputDecoration(
-                        labelText: l10n.companionRelationship,
+                      decoration: const InputDecoration(
+                        labelText: 'Companion relationship (optional)',
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -641,39 +630,23 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
                       children: [
                         TextButton(
                           onPressed: () => Navigator.pop(context),
-                          child: Text(l10n.cancel),
+                          child: const Text('Cancel'),
                         ),
                         const SizedBox(width: 8),
                         FilledButton(
                           onPressed: () async {
-                            await repo.updateSummary(
-                              uid: user.id,
-                              tripId: trip.id,
-                              originRegion: originCtrl.text.trim().isEmpty
-                                  ? null
-                                  : originCtrl.text.trim(),
-                              destinationRegion: destCtrl.text.trim().isEmpty
-                                  ? null
-                                  : destCtrl.text.trim(),
-                              tripNumber: tripNumCtrl.text.trim().isEmpty
-                                  ? null
-                                  : tripNumCtrl.text.trim(),
-                              chainId: chainCtrl.text.trim().isEmpty
-                                  ? null
-                                  : chainCtrl.text.trim(),
-                              companions: Companions(
-                                adults: adults,
-                                children: children,
-                                seniors: seniors,
-                                relationship:
-                                    relationshipCtrl.text.trim().isEmpty
-                                    ? null
-                                    : relationshipCtrl.text.trim(),
-                              ),
-                            );
+                            // Persist a subset of editable fields to Supabase trips row
+                            await ref
+                                .read(tripServiceProvider)
+                                .updateTrip(
+                                  tripId: trip.id,
+                                  mode: trip.mode.name,
+                                  purpose: trip.purpose.name,
+                                  notes: trip.notes,
+                                );
                             if (context.mounted) Navigator.pop(context);
                           },
-                          child: Text(l10n.save),
+                          child: const Text('Save'),
                         ),
                       ],
                     ),
@@ -688,19 +661,4 @@ class _HistoryScreenEnhancedState extends ConsumerState<HistoryScreenEnhanced> {
   }
 }
 
-class _NatpacExportScreen extends ConsumerWidget {
-  const _NatpacExportScreen({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('NATPAC Export')),
-      body: const Padding(
-        padding: EdgeInsets.all(16),
-        child: Text(
-          'Export CSV/JSON of trips with fields needed for planning.',
-        ),
-      ),
-    );
-  }
-}
+// NATPAC export screen removed (unused)

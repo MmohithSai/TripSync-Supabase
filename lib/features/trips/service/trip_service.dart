@@ -2,10 +2,62 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../common/providers.dart';
 import '../data/supabase_trip_repository.dart';
+import '../domain/trip_models.dart';
 
 class TripService {
   final Ref ref;
   TripService(this.ref);
+
+  /// Create a trip row immediately at start and return its id
+  Future<String> createTripStart({
+    required Map<String, double> startLocation,
+    String? originRegion,
+    String mode = 'unknown',
+    String purpose = 'unknown',
+    String? notes,
+  }) async {
+    final user = ref.read(currentUserProvider);
+    if (user == null) {
+      throw Exception('User not authenticated');
+    }
+    final now = DateTime.now();
+    final tripNumber = _generateTripNumber(now);
+    final chainId = _generateChainId(now);
+    final repository = ref.read(supabaseTripRepositoryProvider);
+    return await repository.createTripStart(
+      userId: user.id,
+      startLocation: startLocation,
+      originRegion: originRegion,
+      mode: mode,
+      purpose: purpose,
+      tripNumber: tripNumber,
+      chainId: chainId,
+      notes: notes,
+    );
+  }
+
+  /// Finalize a trip with end data when stopping
+  Future<void> finalizeTrip({
+    required String tripId,
+    required Map<String, double> endLocation,
+    required double distanceKm,
+    required int durationMin,
+    String? destinationRegion,
+  }) async {
+    final user = ref.read(currentUserProvider);
+    if (user == null) {
+      throw Exception('User not authenticated');
+    }
+    final repository = ref.read(supabaseTripRepositoryProvider);
+    await repository.finalizeTrip(
+      tripId: tripId,
+      userId: user.id,
+      endLocation: endLocation,
+      distanceKm: distanceKm,
+      durationMin: durationMin,
+      destinationRegion: destinationRegion,
+    );
+  }
 
   /// Save a trip in your specified format
   /// Example usage:
@@ -32,6 +84,7 @@ class TripService {
     String? originRegion,
     String? destinationRegion,
     bool isRecurring = false,
+    List<TripPoint>? tripPoints, // Complete route data
   }) async {
     final user = ref.read(currentUserProvider);
     if (user == null) {
@@ -59,6 +112,7 @@ class TripService {
       originRegion: originRegion,
       destinationRegion: destinationRegion,
       isRecurring: isRecurring,
+      tripPoints: tripPoints,
     );
   }
 
@@ -156,6 +210,64 @@ class TripService {
 
     final repository = ref.read(supabaseTripRepositoryProvider);
     await repository.deleteTrip(tripId: tripId, userId: user.id);
+  }
+
+  /// Save trip points for a trip
+  Future<void> saveTripPoints(String tripId, List<TripPoint> tripPoints) async {
+    final user = ref.read(currentUserProvider);
+    if (user == null) {
+      throw Exception('User not authenticated');
+    }
+
+    final repository = ref.read(supabaseTripRepositoryProvider);
+    await repository.saveTripPoints(tripId, user.id, tripPoints);
+  }
+
+  /// Get trip points for a specific trip
+  Future<List<TripPoint>> getTripPoints(String tripId) async {
+    final user = ref.read(currentUserProvider);
+    if (user == null) {
+      throw Exception('User not authenticated');
+    }
+
+    final repository = ref.read(supabaseTripRepositoryProvider);
+    return await repository.getTripPoints(tripId, user.id);
+  }
+
+  /// Get trip with complete route data
+  Future<Map<String, dynamic>?> getTripWithRoute(String tripId) async {
+    final user = ref.read(currentUserProvider);
+    if (user == null) {
+      throw Exception('User not authenticated');
+    }
+
+    final repository = ref.read(supabaseTripRepositoryProvider);
+    return await repository.getTripWithRoute(tripId, user.id);
+  }
+
+  /// Get trips with route data for a user
+  Future<List<Map<String, dynamic>>> getUserTripsWithRoutes() async {
+    final user = ref.read(currentUserProvider);
+    if (user == null) {
+      throw Exception('User not authenticated');
+    }
+
+    final repository = ref.read(supabaseTripRepositoryProvider);
+    return await repository.getUserTripsWithRoutes(user.id);
+  }
+
+  /// Update trip points for an existing trip
+  Future<void> updateTripPoints(
+    String tripId,
+    List<TripPoint> tripPoints,
+  ) async {
+    final user = ref.read(currentUserProvider);
+    if (user == null) {
+      throw Exception('User not authenticated');
+    }
+
+    final repository = ref.read(supabaseTripRepositoryProvider);
+    await repository.updateTripPoints(tripId, user.id, tripPoints);
   }
 }
 

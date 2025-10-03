@@ -1,0 +1,674 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+
+import '../../location/service/location_controller.dart';
+import '../data/places_repository.dart';
+import '../../../common/providers.dart';
+import '../../trips/service/trip_controller.dart';
+// removed unused imports after simplifying start flow
+
+class MapScreen extends ConsumerStatefulWidget {
+  const MapScreen({super.key});
+
+  @override
+  ConsumerState<MapScreen> createState() => _MapScreenState();
+}
+
+class _MapScreenState extends ConsumerState<MapScreen>
+    with WidgetsBindingObserver {
+  GoogleMapController? _mapController;
+  StreamSubscription? _followSub;
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _followSub?.cancel();
+    _mapController?.dispose();
+    super.dispose();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Coming back from Settings or background: refresh immediately
+      ref.read(locationControllerProvider.notifier).refreshNow();
+      final p = ref.read(locationControllerProvider).currentPosition;
+      if (p != null && _mapController != null) {
+        _mapController!.moveCamera(
+          CameraUpdate.newLatLng(LatLng(p.latitude, p.longitude)),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final locationState = ref.watch(locationControllerProvider);
+    final user = ref.watch(currentUserProvider);
+    final placesRepo = ref.read(placesRepositoryProvider);
+    final position = locationState.currentPosition;
+    final tripState = ref.watch(tripControllerProvider);
+
+    // Permission and service prompts are handled globally by PermissionGate
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Live Map')),
+      body: Stack(
+        children: [
+          StreamBuilder<List<SavedPlace>>(
+            stream: user == null
+                ? const Stream.empty()
+                : placesRepo.watchPlaces(user.id),
+            builder: (context, snapshot) {
+              final places = snapshot.data ?? const <SavedPlace>[];
+              final placeMarkers = places
+                  .map(
+                    (p) => Marker(
+                      markerId: MarkerId('place_${p.id}'),
+                      position: LatLng(p.latitude, p.longitude),
+                      infoWindow: InfoWindow(title: p.label),
+                      icon: BitmapDescriptor.defaultMarkerWithHue(
+                        BitmapDescriptor.hueAzure,
+                      ),
+                    ),
+                  )
+                  .toSet();
+
+              // Add blue path markers for current trip
+              final tripMarkers = <Marker>{};
+              final polylines = <Polyline>{};
+              
+              if (tripState.activeTripId != null && tripState.bufferedPoints.isNotEmpty) {
+                // Add markers for each trip point
+                for (int i = 0; i < tripState.bufferedPoints.length; i++) {
+                  final point = tripState.bufferedPoints[i];
+                  tripMarkers.add(
+                    Marker(
+                      markerId: MarkerId('trip_${i}'),
+                      position: LatLng(point.latitude, point.longitude),
+                      icon: BitmapDescriptor.defaultMarkerWithHue(
+                        BitmapDescriptor.hueBlue,
+                      ),
+                      infoWindow: InfoWindow(
+                        title: 'Trip Point ${i + 1}',
+                        snippet: '${point.latitude.toStringAsFixed(6)}, ${point.longitude.toStringAsFixed(6)}',
+                      ),
+                    ),
+                  );
+                }
+                
+                // Add blue polyline to show the route
+                if (tripState.bufferedPoints.length > 1) {
+                  final points = tripState.bufferedPoints
+                      .map((p) => LatLng(p.latitude, p.longitude))
+                      .toList();
+                  
+                  polylines.add(
+                    Polyline(
+                      polylineId: const PolylineId('trip_route'),
+                      points: points,
+                      color: Colors.blue,
+                      width: 4,
+                      patterns: [PatternItem.dot, PatternItem.gap(10)],
+                    ),
+                  );
+                }
+              }
+              return GoogleMap(
+                initialCameraPosition: CameraPosition(
+                  target: position != null
+                      ? LatLng(position.latitude, position.longitude)
+                      : const LatLng(37.42796133580664, -122.085749655962),
+                  zoom: 16,
+                ),
+                myLocationEnabled: true,
+                myLocationButtonEnabled: true,
+                zoomControlsEnabled: true,
+                padding: const EdgeInsets.only(bottom: 90, left: 8, right: 8),
+                markers: {...placeMarkers, ...tripMarkers},
+                polylines: polylines,
+                onMapCreated: (c) {
+                  _mapController = c;
+                  _followSub?.cancel();
+                  _followSub = ref
+                      .read(locationControllerProvider.notifier)
+                      .positionStream
+                      .listen((p) {
+                        if (_mapController == null) return;
+                        _mapController!.animateCamera(
+                          CameraUpdate.newLatLng(
+                            LatLng(p.latitude, p.longitude),
+                          ),
+                        );
+                      });
+                  // Trigger an immediate refresh to move camera to the latest fix
+                  ref.read(locationControllerProvider.notifier).refreshNow();
+                },
+                onLongPress: (latLng) async {
+                  if (user == null) return;
+                  final label = await showModalBottomSheet<String>(
+                    context: context,
+                    showDragHandle: true,
+                    builder: (context) {
+                      TextEditingController controller =
+                          TextEditingController();
+                      return Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text(
+                              'Save place',
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                            const SizedBox(height: 12),
+                            Wrap(
+                              spacing: 8,
+                              children: [
+                                ActionChip(
+                                  label: const Text('Home'),
+                                  onPressed: () =>
+                                      Navigator.pop(context, 'Home'),
+                                ),
+                                ActionChip(
+                                  label: const Text('Office'),
+                                  onPressed: () =>
+                                      Navigator.pop(context, 'Office'),
+                                ),
+                                ActionChip(
+                                  label: const Text('Custom…'),
+                                  onPressed: () =>
+                                      Navigator.pop(context, '__custom__'),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            TextField(
+                              controller: controller,
+                              decoration: const InputDecoration(
+                                labelText: 'Custom label',
+                                hintText: 'e.g. Gym, School, Grocery',
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(context),
+                                  child: const Text('Cancel'),
+                                ),
+                                const SizedBox(width: 8),
+                                FilledButton(
+                                  onPressed: () {
+                                    final txt = controller.text.trim();
+                                    Navigator.pop(
+                                      context,
+                                      txt.isEmpty ? 'Place' : txt,
+                                    );
+                                  },
+                                  child: const Text('Save'),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  );
+                  if (label == null) return;
+                  final resolvedLabel = label == '__custom__' ? 'Place' : label;
+                  await placesRepo.addPlace(
+                    uid: user.id,
+                    label: resolvedLabel,
+                    latitude: latLng.latitude,
+                    longitude: latLng.longitude,
+                  );
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(const SnackBar(content: Text('Place saved')));
+                },
+                polylines: {
+                  if (tripState.bufferedPoints.length >= 2)
+                    Polyline(
+                      polylineId: const PolylineId('active_trip'),
+                      color: Colors.indigo,
+                      width: 4,
+                      points: tripState.bufferedPoints
+                          .map((p) => LatLng(p.latitude, p.longitude))
+                          .toList(),
+                    ),
+                },
+                markers: {
+                  if (position != null)
+                    Marker(
+                      markerId: const MarkerId('me'),
+                      position: LatLng(position.latitude, position.longitude),
+                    ),
+                  ...placeMarkers,
+                },
+              );
+            },
+          ),
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: 24,
+            child: Row(
+              children: [
+                Expanded(
+                  child: FloatingActionButton.extended(
+                    heroTag: 'locate_me',
+                    icon: const Icon(Icons.my_location),
+                    label: const Text('Locate'),
+                    onPressed: () async {
+                      final controller = ref.read(
+                        locationControllerProvider.notifier,
+                      );
+                      final s = ref.read(locationControllerProvider);
+                      if (!s.permissionsGranted) {
+                        await controller.requestPermissions();
+                      }
+                      await controller.refreshNow();
+                      final p = ref
+                          .read(locationControllerProvider)
+                          .currentPosition;
+                      if (p != null && _mapController != null) {
+                        _mapController!.animateCamera(
+                          CameraUpdate.newLatLng(
+                            LatLng(p.latitude, p.longitude),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FloatingActionButton.extended(
+                    heroTag: 'trip_toggle',
+                    icon: Icon(
+                      tripState.activeTripId == null
+                          ? Icons.play_arrow
+                          : Icons.stop,
+                    ),
+                    label: Text(
+                      tripState.activeTripId == null ? 'Start' : 'Stop',
+                    ),
+                    onPressed: () async {
+                      final ctrl = ref.read(tripControllerProvider.notifier);
+                      final loc = ref.read(locationControllerProvider);
+                      // Basic guardrails and UX feedback
+                      if (!loc.permissionsGranted) {
+                        await ref
+                            .read(locationControllerProvider.notifier)
+                            .requestPermissions();
+                      }
+                      if (!mounted) return;
+                      try {
+                        if (tripState.activeTripId == null) {
+                          // Auto start without prompts
+                          await ctrl.startManual();
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Trip started')),
+                          );
+                          return;
+                        } else {
+                          final tripData = await ctrl.stopManual();
+                          // Ensure UI rebuilds with fresh provider state
+                          ref.invalidate(tripControllerProvider);
+                          if (!mounted) return;
+                          
+                          if (tripData != null) {
+                            // After stop, collect remaining details
+                            final details = await showModalBottomSheet<
+                              ({
+                                String? mode,
+                                String? purpose,
+                                int adults,
+                                int children,
+                                int seniors,
+                                String? frequency,
+                                double? cost,
+                              })
+                            >(
+                            context: context,
+                            showDragHandle: true,
+                            isScrollControlled: true,
+                            builder: (context) {
+                              String? mode;
+                              String? purpose;
+                              int adults = 0;
+                              int children = 0;
+                              int seniors = 0;
+                              final freqCtrl = TextEditingController();
+                              final costCtrl = TextEditingController();
+                              return Container(
+                                height: MediaQuery.of(context).size.height * 0.8,
+                                padding: const EdgeInsets.all(16),
+                                child: StatefulBuilder(
+                                  builder: (context, setSheet) {
+                                    return SingleChildScrollView(
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.stretch,
+                                        children: [
+                                        Text(
+                                          'Trip details',
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.titleMedium,
+                                        ),
+                                        const SizedBox(height: 12),
+                                        DropdownButtonFormField<String>(
+                                          value: mode,
+                                          items: const [
+                                            DropdownMenuItem(
+                                              value: 'unknown',
+                                              child: Text('Unknown'),
+                                            ),
+                                            DropdownMenuItem(
+                                              value: 'walk',
+                                              child: Text('Walk'),
+                                            ),
+                                            DropdownMenuItem(
+                                              value: 'bike',
+                                              child: Text('Bike'),
+                                            ),
+                                            DropdownMenuItem(
+                                              value: 'car',
+                                              child: Text('Car'),
+                                            ),
+                                            DropdownMenuItem(
+                                              value: 'bus',
+                                              child: Text('Bus'),
+                                            ),
+                                            DropdownMenuItem(
+                                              value: 'train',
+                                              child: Text('Train'),
+                                            ),
+                                            DropdownMenuItem(
+                                              value: 'auto',
+                                              child: Text('Auto/Taxi'),
+                                            ),
+                                          ],
+                                          onChanged: (v) =>
+                                              setSheet(() => mode = v),
+                                          decoration: const InputDecoration(
+                                            labelText: 'Mode',
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        DropdownButtonFormField<String>(
+                                          value: purpose,
+                                          items: const [
+                                            DropdownMenuItem(
+                                              value: 'unknown',
+                                              child: Text('Unknown'),
+                                            ),
+                                            DropdownMenuItem(
+                                              value: 'work',
+                                              child: Text('Work'),
+                                            ),
+                                            DropdownMenuItem(
+                                              value: 'education',
+                                              child: Text('Education'),
+                                            ),
+                                            DropdownMenuItem(
+                                              value: 'shopping',
+                                              child: Text('Shopping'),
+                                            ),
+                                            DropdownMenuItem(
+                                              value: 'leisure',
+                                              child: Text('Leisure'),
+                                            ),
+                                            DropdownMenuItem(
+                                              value: 'other',
+                                              child: Text('Other'),
+                                            ),
+                                          ],
+                                          onChanged: (v) =>
+                                              setSheet(() => purpose = v),
+                                          decoration: const InputDecoration(
+                                            labelText: 'Purpose',
+                                          ),
+                                        ),
+                                        const SizedBox(height: 12),
+                                        Row(
+                                          children: [
+                                            const Expanded(
+                                              child: Text('Adults'),
+                                            ),
+                                            IconButton(
+                                              onPressed: () => setSheet(
+                                                () => adults = adults > 0
+                                                    ? adults - 1
+                                                    : 0,
+                                              ),
+                                              icon: const Icon(
+                                                Icons.remove_circle_outline,
+                                              ),
+                                            ),
+                                            Text('$adults'),
+                                            IconButton(
+                                              onPressed: () => setSheet(
+                                                () => adults = adults + 1,
+                                              ),
+                                              icon: const Icon(
+                                                Icons.add_circle_outline,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        Row(
+                                          children: [
+                                            const Expanded(
+                                              child: Text('Children'),
+                                            ),
+                                            IconButton(
+                                              onPressed: () => setSheet(
+                                                () => children = children > 0
+                                                    ? children - 1
+                                                    : 0,
+                                              ),
+                                              icon: const Icon(
+                                                Icons.remove_circle_outline,
+                                              ),
+                                            ),
+                                            Text('$children'),
+                                            IconButton(
+                                              onPressed: () => setSheet(
+                                                () => children = children + 1,
+                                              ),
+                                              icon: const Icon(
+                                                Icons.add_circle_outline,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        Row(
+                                          children: [
+                                            const Expanded(
+                                              child: Text('Seniors'),
+                                            ),
+                                            IconButton(
+                                              onPressed: () => setSheet(
+                                                () => seniors = seniors > 0
+                                                    ? seniors - 1
+                                                    : 0,
+                                              ),
+                                              icon: const Icon(
+                                                Icons.remove_circle_outline,
+                                              ),
+                                            ),
+                                            Text('$seniors'),
+                                            IconButton(
+                                              onPressed: () => setSheet(
+                                                () => seniors = seniors + 1,
+                                              ),
+                                              icon: const Icon(
+                                                Icons.add_circle_outline,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 8),
+                                        TextField(
+                                          controller: freqCtrl,
+                                          decoration: const InputDecoration(
+                                            labelText:
+                                                'Frequency (e.g. Daily/Weekly/Occasional)',
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        TextField(
+                                          controller: costCtrl,
+                                          keyboardType: TextInputType.number,
+                                          decoration: const InputDecoration(
+                                            labelText: 'Cost incurred (₹)',
+                                          ),
+                                        ),
+                                        const SizedBox(height: 12),
+                                        Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.end,
+                                          children: [
+                                            TextButton(
+                                              onPressed: () =>
+                                                  Navigator.pop(context),
+                                              child: const Text('Skip'),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            FilledButton(
+                                              onPressed: () {
+                                                final costVal = double.tryParse(
+                                                  costCtrl.text.trim(),
+                                                );
+                                                Navigator.pop<
+                                                  ({
+                                                    String? mode,
+                                                    String? purpose,
+                                                    int adults,
+                                                    int children,
+                                                    int seniors,
+                                                    String? frequency,
+                                                    double? cost,
+                                                  })
+                                                >(context, (
+                                                  mode: mode,
+                                                  purpose: purpose,
+                                                  adults: adults,
+                                                  children: children,
+                                                  seniors: seniors,
+                                                  frequency:
+                                                      freqCtrl.text
+                                                          .trim()
+                                                          .isEmpty
+                                                      ? null
+                                                      : freqCtrl.text.trim(),
+                                                  cost: costVal,
+                                                ));
+                                              },
+                                              child: const Text('Save'),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    );
+                                  },
+                                ),
+                              );
+                            
+                            // Save trip with details if user provided them
+                            if (details != null) {
+                              try {
+                                await ctrl.saveTripWithDetails(
+                                  startedAt: tripData.startedAt,
+                                  startLocation: tripData.startLocation,
+                                  endLocation: tripData.endLocation,
+                                  distanceMeters: tripData.distanceMeters,
+                                  allPoints: tripData.allPoints,
+                                  destinationRegion: tripData.destinationRegion,
+                                  mode: details.mode,
+                                  purpose: details.purpose,
+                                  companions: {
+                                    'adults': details.adults,
+                                    'children': details.children,
+                                    'seniors': details.seniors,
+                                  },
+                                  notes: [
+                                    if (details.frequency != null)
+                                      'frequency=${details.frequency}',
+                                    if (details.cost != null)
+                                      'cost=${details.cost}',
+                                  ].join('; '),
+                                );
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Trip saved with details')),
+                                  );
+                                }
+                              } catch (e) {
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Failed to save trip: $e')),
+                                  );
+                                }
+                              }
+                            } else {
+                              // User skipped details, save basic trip
+                              try {
+                                await ctrl.saveTripWithDetails(
+                                  startedAt: tripData.startedAt,
+                                  startLocation: tripData.startLocation,
+                                  endLocation: tripData.endLocation,
+                                  distanceMeters: tripData.distanceMeters,
+                                  allPoints: tripData.allPoints,
+                                  destinationRegion: tripData.destinationRegion,
+                                );
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Trip saved')),
+                                  );
+                                }
+                              } catch (e) {
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Failed to save trip: $e')),
+                                  );
+                                }
+                              }
+                            }
+                          }
+                        }
+                      } catch (e) {
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Action failed: $e')),
+                        );
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // No extra in-app permission banner; rely on OS dialog and Settings flow
+        ],
+      ),
+    );
+  }
+}

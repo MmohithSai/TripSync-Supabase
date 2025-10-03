@@ -1,10 +1,45 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../common/providers.dart';
+import '../domain/trip_models.dart';
 
 class SupabaseTripRepository {
   final Ref ref;
   SupabaseTripRepository(this.ref);
+
+  /// Create a trip row at start and return its id
+  Future<String> createTripStart({
+    required String userId,
+    required Map<String, double> startLocation,
+    String? originRegion,
+    String mode = 'unknown',
+    String purpose = 'unknown',
+    String? tripNumber,
+    String? chainId,
+    String? notes,
+  }) async {
+    final supabase = ref.read(supabaseProvider);
+    final data = {
+      'user_id': userId,
+      'start_location': startLocation,
+      'end_location': startLocation,
+      'distance_km': 0.0,
+      'duration_min': 0,
+      'timestamp': DateTime.now().toIso8601String(),
+      'mode': mode,
+      'purpose': purpose,
+      if (originRegion != null) 'origin_region': originRegion,
+      if (tripNumber != null) 'trip_number': tripNumber,
+      if (chainId != null) 'chain_id': chainId,
+      if (notes != null) 'notes': notes,
+    };
+    final response = await supabase
+        .from('trips')
+        .insert(data)
+        .select()
+        .single();
+    return response['id'] as String;
+  }
 
   /// Save a trip to Supabase in your specified format
   Future<String> saveTrip({
@@ -24,6 +59,7 @@ class SupabaseTripRepository {
     String? originRegion,
     String? destinationRegion,
     bool isRecurring = false,
+    List<TripPoint>? tripPoints, // Complete route data
   }) async {
     final supabase = ref.read(supabaseProvider);
 
@@ -51,7 +87,14 @@ class SupabaseTripRepository {
         .select()
         .single();
 
-    return response['id'] as String;
+    final tripId = response['id'] as String;
+
+    // Save trip points if provided
+    if (tripPoints != null && tripPoints.isNotEmpty) {
+      await saveTripPoints(tripId, userId, tripPoints);
+    }
+
+    return tripId;
   }
 
   /// Get trips for a user
@@ -112,6 +155,31 @@ class SupabaseTripRepository {
     }
   }
 
+  /// Finalize a trip after stopping
+  Future<void> finalizeTrip({
+    required String tripId,
+    required String userId,
+    required Map<String, double> endLocation,
+    required double distanceKm,
+    required int durationMin,
+    String? destinationRegion,
+  }) async {
+    final supabase = ref.read(supabaseProvider);
+    final updateData = <String, dynamic>{
+      'end_location': endLocation,
+      'distance_km': distanceKm,
+      'duration_min': durationMin,
+    };
+    if (destinationRegion != null) {
+      updateData['destination_region'] = destinationRegion;
+    }
+    await supabase
+        .from('trips')
+        .update(updateData)
+        .eq('id', tripId)
+        .eq('user_id', userId);
+  }
+
   /// Delete a trip
   Future<void> deleteTrip({
     required String tripId,
@@ -124,6 +192,155 @@ class SupabaseTripRepository {
         .delete()
         .eq('id', tripId)
         .eq('user_id', userId);
+  }
+
+  /// Save trip points for a trip
+  Future<void> saveTripPoints(
+    String tripId,
+    String userId,
+    List<TripPoint> tripPoints,
+  ) async {
+    final supabase = ref.read(supabaseProvider);
+
+    if (tripPoints.isEmpty) return;
+
+    // Convert trip points to database format
+    final pointsData = tripPoints
+        .map(
+          (point) => {
+            'trip_id': tripId,
+            'user_id': userId,
+            'latitude': point.latitude,
+            'longitude': point.longitude,
+            'timestamp': point.timestamp.toIso8601String(),
+            'timezone_offset_minutes': point.timezoneOffsetMinutes,
+            if (point.accuracy != null) 'accuracy': point.accuracy,
+            if (point.altitude != null) 'altitude': point.altitude,
+            if (point.speed != null) 'speed': point.speed,
+            if (point.heading != null) 'heading': point.heading,
+            if (point.speedAccuracy != null)
+              'speed_accuracy': point.speedAccuracy,
+            if (point.headingAccuracy != null)
+              'heading_accuracy': point.headingAccuracy,
+            if (point.address != null) 'address': point.address,
+            if (point.placeName != null) 'place_name': point.placeName,
+            if (point.placeId != null) 'place_id': point.placeId,
+            if (point.roadName != null) 'road_name': point.roadName,
+            if (point.city != null) 'city': point.city,
+            if (point.country != null) 'country': point.country,
+            if (point.postalCode != null) 'postal_code': point.postalCode,
+            if (point.metadata != null) 'metadata': point.metadata,
+          },
+        )
+        .toList();
+
+    // Insert in batches to avoid database limits
+    const batchSize = 100;
+    for (int i = 0; i < pointsData.length; i += batchSize) {
+      final batch = pointsData.skip(i).take(batchSize).toList();
+      await supabase.from('trip_points').insert(batch);
+    }
+  }
+
+  /// Get trip points for a specific trip
+  Future<List<TripPoint>> getTripPoints(String tripId, String userId) async {
+    final supabase = ref.read(supabaseProvider);
+
+    final response = await supabase
+        .from('trip_points')
+        .select()
+        .eq('trip_id', tripId)
+        .eq('user_id', userId)
+        .order('timestamp', ascending: true);
+
+    return response.map((data) => TripPoint.fromMap(data)).toList();
+  }
+
+  /// Get trip with complete route data
+  Future<Map<String, dynamic>?> getTripWithRoute(
+    String tripId,
+    String userId,
+  ) async {
+    final supabase = ref.read(supabaseProvider);
+
+    // Get trip data
+    final tripResponse = await supabase
+        .from('trips')
+        .select()
+        .eq('id', tripId)
+        .eq('user_id', userId)
+        .single();
+
+    // tripResponse will never be null due to .single() call
+
+    // Get trip points
+    final pointsResponse = await supabase
+        .from('trip_points')
+        .select()
+        .eq('trip_id', tripId)
+        .eq('user_id', userId)
+        .order('timestamp', ascending: true);
+
+    final tripPoints = pointsResponse
+        .map((data) => TripPoint.fromMap(data))
+        .toList();
+
+    return {
+      'trip': tripResponse,
+      'points': tripPoints.map((point) => point.toMap()).toList(),
+    };
+  }
+
+  /// Get trips with route data for a user
+  Future<List<Map<String, dynamic>>> getUserTripsWithRoutes(
+    String userId,
+  ) async {
+    final supabase = ref.read(supabaseProvider);
+
+    final trips = await getUserTrips(userId);
+    final tripsWithRoutes = <Map<String, dynamic>>[];
+
+    for (final trip in trips) {
+      final tripId = trip['id'] as String;
+      final pointsResponse = await supabase
+          .from('trip_points')
+          .select()
+          .eq('trip_id', tripId)
+          .eq('user_id', userId)
+          .order('timestamp', ascending: true);
+
+      final tripPoints = pointsResponse
+          .map((data) => TripPoint.fromMap(data))
+          .toList();
+
+      tripsWithRoutes.add({
+        'trip': trip,
+        'points': tripPoints.map((point) => point.toMap()).toList(),
+      });
+    }
+
+    return tripsWithRoutes;
+  }
+
+  /// Update trip points for an existing trip
+  Future<void> updateTripPoints(
+    String tripId,
+    String userId,
+    List<TripPoint> tripPoints,
+  ) async {
+    final supabase = ref.read(supabaseProvider);
+
+    // Delete existing points
+    await supabase
+        .from('trip_points')
+        .delete()
+        .eq('trip_id', tripId)
+        .eq('user_id', userId);
+
+    // Insert new points
+    if (tripPoints.isNotEmpty) {
+      await saveTripPoints(tripId, userId, tripPoints);
+    }
   }
 
   /// Get trip statistics
